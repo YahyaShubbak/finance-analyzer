@@ -1,0 +1,51 @@
+@import "tailwindcss";
+
+@theme {
+  /* Neutral surface scale */
+  --color-bg: #F6F7F9;
+  --color-surface: #FFFFFF;
+  --color-surface-sunken: #EEF0F3;
+  --color-border: #E1E4E9;
+  --color-border-strong: #C7CCD4;
+
+  /* Ink */
+  --color-ink: #171A21;
+  --color-ink-muted: #5B6270;
+  --color-ink-faint: #8B93A1;
+
+  /* Brand / accent — a restrained deep teal, distinct from the generic
+     purple/orange AI-tool palette; reads as "ledger", not "marketing". */
+  --color-accent: #1F5C5C;
+  --color-accent-soft: #E5EFEE;
+  --color-accent-strong: #143E3E;
+
+  /* Financial semantics */
+  --color-income: #1E7A4C;
+  --color-income-soft: #E6F4EC;
+  --color-expense: #A8431E;
+  --color-expense-soft: #FBEBE3;
+  --color-warning: #97650B;
+  --color-warning-soft: #FBF1DE;
+  --color-danger: #B0281F;
+  --color-danger-soft: #FCEAE8;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}

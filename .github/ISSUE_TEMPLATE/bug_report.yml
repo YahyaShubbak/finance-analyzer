@@ -1,0 +1,48 @@
+name: Bug report
+description: Something doesn't work or is counted wrongly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Please never attach real bank statements, IBANs, account or card numbers, names or a database.**
+        Issues are public. To show a file the app reads wrongly, recreate a few lines with invented values.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: This report contains no real financial data (only invented or anonymized examples).
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Shown in the sidebar under the app's name.
+      placeholder: "0.8.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Linux, macOS, Windows]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: For an import problem, name the bank and file type (PDF/CSV/XLSX) and describe the layout with invented lines.
+  - type: textarea
+    id: log
+    attributes:
+      label: Error messages
+      description: From the app or the terminal window. Remove anything personal first.
+      render: text

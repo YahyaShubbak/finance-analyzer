@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+backend/.venv/
+backend/finance/
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/htmlcov/
+.coverage
+
+# Local configuration written by the install scripts
+finance.env
+.env
+
+# Financial data — never commit real statements, databases or backups.
+# (Since 0.2 the app stores its data outside the checkout by default; these
+# rules protect installations that still use the old in-repo layout.)
+# Leading "/" = only at the repository root: a bare "imports/" would also
+# ignore source folders such as frontend/src/components/imports/.
+/data/
+/imports/
+/exports/
+/backups/
+*.db
+*.db-wal
+*.db-shm
+# Real statements for local testing — keep them out of every repository
+/Testdata/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# OS / editors
+.DS_Store
+Thumbs.db

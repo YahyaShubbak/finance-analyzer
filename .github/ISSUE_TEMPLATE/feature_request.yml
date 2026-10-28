@@ -1,0 +1,13 @@
+name: Feature request
+description: An idea for the app, or a bank/statement format to support
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: "**Please don't attach real statements.** For a new format, describe it with a few invented lines."
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like, and why?
+    validations:
+      required: true

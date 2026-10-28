@@ -1,0 +1,54 @@
+[project]
+name = "finance-backend"
+version = "0.8.0"
+description = "Local-first personal finance analyzer — backend"
+license = "AGPL-3.0-or-later"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    # 0.0.45 refuses datetimes without a time zone; the app stores naive UTC
+    "sqlmodel>=0.0.22,<0.0.45",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "pandas>=2.2",
+    "pymupdf>=1.24,<2",  # 2.0 is a major update: upgrade on its own
+    "alembic>=1.14",
+    "python-multipart>=0.0.12",
+    "chardet>=5.2",
+    "openpyxl>=3.1",
+    "platformdirs>=4.2",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "httpx>=0.27",
+    "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["app/db/migrations/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S"]
+ignore = [
+    "E501",  # long lines are left to judgement, not enforced
+    "UP042",  # (str, Enum) -> StrEnum would change str() of stored values
+    "E712",  # SQLAlchemy filters need `== False`
+    "E711",  # ... and `== None`
+    "S101",  # assert is fine in tests
+    "S608",  # table names in SQL are internal constants, not user input
+    "B008",  # FastAPI's Depends()/Form() defaults
+    "UP007", "UP045",  # keep Optional[...] in SQLModel models (runtime-evaluated annotations)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "B"]
+"app/db/models.py" = ["UP006", "UP035"]  # SQLModel relationship annotations
