@@ -147,3 +147,33 @@ def test_an_export_is_not_taken_for_a_bill_of_another_amount(client):
     _import(client, card, "amex.csv", EXPORT)
     _import(client, bank, "bank.csv", BILL.replace(b"-80.00", b"-81.00"))
     assert client.get(f"/api/credit-cards/{card}/statements").json() == []
+
+
+@pytest.mark.parametrize("order", [("bank", "card"), ("card", "bank")])
+def test_a_purchase_that_costs_what_the_bill_is_stays_an_expense(client, tmp_path, order):
+    """The card's bill is paid from an account that isn't imported; the
+    imported one has a cash withdrawal of the same 50.00 a few days after the
+    statement. Linked as the bill's payment it would be a transfer, and 50.00
+    of spending would vanish from every total — so it is only suggested."""
+    bank = _account(client, "Giro", "checking")
+    card = _account(client, "Visa", "credit_card")
+    files = {
+        "bank": (bank, "bank.csv", b"Date,Description,Amount\n2026-04-03,Geldautomat Hauptbahnhof,-50.00\n", "text/csv"),
+        "card": (card, "march.pdf", _statement(tmp_path, [
+            "02.03.2026 Restaurant Beispiel 50.00 EUR",
+            "Statement Total: 50.00 EUR",
+        ]), "application/pdf"),
+    }
+    for which in order:
+        _import(client, *files[which])
+
+    withdrawal = _by_amount(client, bank)[-5000]
+    assert (withdrawal["transaction_type"], withdrawal["category"]) == ("expense", "Cash")
+    assert client.get("/api/analytics/totals").json()["expenses_minor"] == 5000 + 5000
+
+    statement = client.get(f"/api/credit-cards/{card}/statements").json()[0]
+    assert statement["reconciliation_status"] == "pending"
+    payment = client.get(f"/api/reconciliation/statements/{statement['id']}").json()["bank_payment"]
+    assert payment["status"] == "suggested"
+    assert [c["id"] for c in payment["candidates"]] == [withdrawal["id"]]
+    assert payment["recommended_transaction_id"] == withdrawal["id"]

@@ -8,6 +8,7 @@ import { ImportReview } from "./ImportReview";
 import {
   useCommitImport,
   useDiscardStagedImport,
+  useImportHistory,
   usePreviewImport,
   useRecognizeImport,
   useRemoveImport,
@@ -16,7 +17,7 @@ import {
 import { useAccounts } from "../../hooks/useAccounts";
 import { useI18n } from "../../i18n/useI18n";
 import { formatDate, formatMoney, formatSignedMoney } from "../../lib/format";
-import { noteLearned, useLearnedVersion, type CardSnapshot } from "../../state/importQueue";
+import { isSameImport, noteLearned, useLearnedVersion, type CardSnapshot } from "../../state/importQueue";
 import type {
   Account,
   ImportCommitResult,
@@ -61,6 +62,7 @@ export function ImportFileCard({
 
   const [p, setPreview] = useState<ImportPreview | undefined>(snapshot.preview);
   const [committed, setCommitted] = useState<ImportCommitResult | undefined>(snapshot.committed);
+  const [seenInHistory, setSeenInHistory] = useState(Boolean(snapshot.seenInHistory));
   const [showDetails, setShowDetails] = useState(false);
   const [showRows, setShowRows] = useState(false);
   const [showMapping, setShowMapping] = useState(false);
@@ -85,13 +87,14 @@ export function ImportFileCard({
   const discard = useDiscardStagedImport();
   const commit = useCommitImport();
   const removal = useRemoveImport();
+  const history = useImportHistory();
   const started = useRef(false);
 
   // keep the card's progress when the page is left
   useEffect(() => {
-    onSnapshot({ preview: p, committed, autoImported, manual, undone, formOptions, reviewDismissed });
+    onSnapshot({ preview: p, committed, seenInHistory, autoImported, manual, undone, formOptions, reviewDismissed });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p, committed, autoImported, manual, undone, formOptions, reviewDismissed]);
+  }, [p, committed, seenInHistory, autoImported, manual, undone, formOptions, reviewDismissed]);
 
   function applyPreview(data: ImportPreview) {
     setPreview(data);
@@ -173,6 +176,7 @@ export function ImportFileCard({
       {
         onSuccess: (result) => {
           setCommitted(result);
+          setSeenInHistory(false); // the list of imports doesn't know it yet
           setAutoImported(auto);
           setReviewOpen(false);
           onDone();
@@ -229,16 +233,35 @@ export function ImportFileCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p]);
 
+  // The file is not imported any more: back to choosing an account.
+  function forgetImport() {
+    commit.reset();
+    setCommitted(undefined);
+    setSeenInHistory(false);
+    setPreview(undefined);
+    setManual(true);
+    setUndone(true);
+    setPickAccount(true);
+  }
+
+  // The card outlives its import: it may be removed in the list below or in
+  // another window, and its number may belong to another import since. Once
+  // the list has shown this card's import, its absence means it is gone —
+  // "Undo" must never remove whatever has that number now.
+  const stillImported = committed !== undefined && isSameImport(committed, history.data);
+  useEffect(() => {
+    if (!committed || !history.data || history.isFetching) return;
+    if (stillImported) setSeenInHistory(true);
+    else if (seenInHistory) forgetImport();
+    // (not seen yet: the list is from before this import and is being read again)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [committed, history.data, history.isFetching, stillImported, seenInHistory]);
+
   function undo() {
-    if (!committed) return;
+    if (!committed || !stillImported) return;
     removal.mutate(committed.import_id, {
       onSuccess: () => {
-        commit.reset();
-        setCommitted(undefined);
-        setPreview(undefined);
-        setManual(true);
-        setUndone(true);
-        setPickAccount(true);
+        forgetImport();
         onDone();
       },
     });
@@ -497,7 +520,7 @@ export function ImportFileCard({
           <button
             type="button"
             className="text-ink-muted underline underline-offset-2 hover:text-ink disabled:opacity-50"
-            disabled={removal.isPending}
+            disabled={removal.isPending || !stillImported}
             onClick={undo}
             title={t("importCard.undoTitle")}
           >

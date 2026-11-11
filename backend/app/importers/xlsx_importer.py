@@ -28,12 +28,15 @@ class XLSXImporter(BaseImporter):
         raw_bytes = self.file_path.read_bytes()
         checksum = hashlib.sha256(raw_bytes).hexdigest()
 
-        try:
-            workbook = load_workbook(self.file_path, data_only=True, read_only=True)
-        except Exception as exc:  # noqa: BLE001 — any unreadable workbook is a user-facing error
+        def unreadable(exc: Exception) -> ParsedImport:
             return _error_result(self.original_filename, checksum, tr(
                 "Could not open the spreadsheet — it may be damaged or not an XLSX file ({error}).",
                 error=type(exc).__name__))
+
+        try:
+            workbook = load_workbook(self.file_path, data_only=True, read_only=True)
+        except Exception as exc:  # noqa: BLE001 — any unreadable workbook is a user-facing error
+            return unreadable(exc)
 
         try:
             sheets = []
@@ -47,6 +50,8 @@ class XLSXImporter(BaseImporter):
                         return too_large(self.original_filename, checksum)
                 if any(c is not None and str(c).strip() for row in rows for c in row):
                     sheets.append(rows)
+        except Exception as exc:  # noqa: BLE001 — a damaged sheet: in read-only mode its rows are only read here
+            return unreadable(exc)
         finally:
             workbook.close()
 

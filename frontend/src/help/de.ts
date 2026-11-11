@@ -137,7 +137,7 @@ export const HELP_DE: HelpSection[] = [
         title: "Abrechnung und Abbuchung",
         body: [
           "Die Käufe auf der Kartenabrechnung sind die eigentlichen Ausgaben. Die Abbuchung der Abrechnung vom Girokonto ist eine Umbuchung — die App verknüpft beide, damit nichts doppelt zählt.",
-          "Automatisch verknüpft wird nur, wenn genau eine Abbuchung genau den Abrechnungsbetrag hat. Sonst schlägt die Seite „Abgleich“ passende Abbuchungen vor, die Sie bestätigen.",
+          "Automatisch verknüpft wird nur, wenn genau eine Abbuchung genau den Abrechnungsbetrag hat — und nicht schon als Einkauf einsortiert ist (etwa „Bargeld“ oder „Lebensmittel“): Verknüpft zählt sie nicht mehr als Ausgabe. Sonst schlägt die Seite „Abgleich“ passende Abbuchungen vor, die Sie bestätigen.",
           "Haben Sie für eine Karte keine Abrechnungen importiert, zählt ihre Abbuchung vom Girokonto als Ausgabe der Kategorie „Kreditkartenabrechnungen“ — so geht die Ausgabe nicht verloren.",
         ],
         link: { to: "/reconciliation", label: "Zum Abgleich" },

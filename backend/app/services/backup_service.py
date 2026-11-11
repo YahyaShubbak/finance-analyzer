@@ -30,16 +30,23 @@ the current schema inside a temporary directory next to the live data
 first. Only when that fully succeeded is a safety backup of the current
 state taken and the staged files swapped into place — so a corrupt or
 truncated backup can never leave the app half-restored.
+
+The swap itself is all or nothing as well (see _swap_in): the current
+database and documents are moved aside, not overwritten, and moved back
+if any step fails — e.g. a document that is open in another program — so
+a restored database never ends up next to the previous documents.
 """
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import sqlite3
 import tempfile
 import uuid
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -59,6 +66,10 @@ _COUNTED_TABLES = [
 
 _IMPORTS_PREFIX = "imports/"
 _COPY_CHUNK = 1024 * 1024
+#: inside the staging folder of a restore: the database and documents it replaced
+_PREVIOUS = "previous"
+
+logger = logging.getLogger("finance")
 
 
 class BackupError(Exception):
@@ -348,6 +359,78 @@ def _stage_restore(zip_path: Path, staging_root: Path) -> tuple[Path, Path]:
     return staged_db, staged_imports
 
 
+class _SwapError(Exception):
+    """The restored files could not be put in place. `put_back`: the
+    previous database and documents are where they were again."""
+
+    def __init__(self, cause: OSError, put_back: bool):
+        super().__init__(str(cause))
+        self.cause = cause
+        self.put_back = put_back
+
+
+def _put_folder_back(saved: Path, original: Path) -> None:
+    if not saved.exists():
+        return
+    if original.exists():
+        # partly there — a move to another file system that stopped half-way: fill in what is missing
+        shutil.copytree(saved, original, dirs_exist_ok=True)
+    else:
+        shutil.move(saved, original)
+
+
+def _swap_in(staged_db: Path, staged_imports: Path, staging_root: Path) -> None:
+    """Put the staged database and documents in place of the current ones —
+    both, or neither. What is replaced is moved to `staging_root/previous`
+    first; when a step fails, the steps already taken are undone in reverse.
+    The documents go first: they are the step most likely to fail (a file
+    open in a viewer, a folder on another drive), while the database is
+    still untouched.
+
+    Raises _SwapError; pooled connections to the database must be closed."""
+    database, imports = settings.database_path, settings.imports_dir
+    # With its WAL/SHM sidecars: the restored database must not be merged
+    # with the pending WAL data of the old one — which needs them back.
+    database_files = [database, Path(f"{database}-wal"), Path(f"{database}-shm")]
+    previous = staging_root / _PREVIOUS
+    previous.mkdir()
+
+    def put_database_back() -> None:
+        for f in database_files:
+            if (previous / f.name).exists():
+                os.replace(previous / f.name, f)
+
+    def remove_restored_documents() -> None:
+        if imports.exists():
+            shutil.rmtree(imports)
+
+    undo: list[Callable[[], None]] = []  # each registered BEFORE its step: a step may fail half-way
+    try:
+        undo.append(lambda: _put_folder_back(previous / "imports", imports))
+        if imports.exists():
+            # shutil.move: the imports directory may be configured on a
+            # different file system than the data directory.
+            shutil.move(imports, previous / "imports")
+        # (from here on, whatever is at `imports` belongs to the restored backup)
+        undo.append(remove_restored_documents)
+        shutil.move(staged_imports, imports)
+
+        undo.append(put_database_back)
+        for f in database_files:
+            if f.exists():
+                os.replace(f, previous / f.name)
+        os.replace(staged_db, database)
+    except OSError as exc:
+        put_back = True
+        for step in reversed(undo):
+            try:
+                step()
+            except OSError:
+                put_back = False
+                logger.exception("Could not undo a step of the failed restore")
+        raise _SwapError(exc, put_back) from exc
+
+
 def restore_from_backup(zip_path: Path, confirm: bool) -> RestoreResult:
     """Restores the database and imported source documents from a backup
     ZIP. Requires explicit confirmation. Current data is untouched unless
@@ -366,6 +449,7 @@ def restore_from_backup(zip_path: Path, confirm: bool) -> RestoreResult:
 
         staging_root = settings.data_dir / f".restore-{uuid.uuid4().hex}"
         staging_root.mkdir()
+        keep_staging = False
         try:
             staged_db, staged_imports = _stage_restore(zip_path, staging_root)
 
@@ -378,24 +462,21 @@ def restore_from_backup(zip_path: Path, confirm: bool) -> RestoreResult:
             db_session.engine.dispose()
 
             try:
-                # Remove WAL/SHM sidecars so the restored database isn't
-                # merged with stale WAL data from the old one.
-                for suffix in ("-wal", "-shm"):
-                    Path(str(settings.database_path) + suffix).unlink(missing_ok=True)
-                os.replace(staged_db, settings.database_path)
-
-                # shutil.move: the imports directory may be configured on a
-                # different file system than the data directory.
-                previous_imports = staging_root / "imports.previous"
-                if settings.imports_dir.exists():
-                    shutil.move(settings.imports_dir, previous_imports)
-                shutil.move(staged_imports, settings.imports_dir)
-            except OSError as exc:
+                _swap_in(staged_db, staged_imports, staging_root)
+            except _SwapError as exc:
+                failed = tr("Restore failed while replacing files: {error}.", error=exc.cause)
+                if exc.put_back:
+                    raise BackupError(failed + " " + tr("Nothing was changed: your data is as it was before.")) from exc
+                # What was replaced stays where it was moved to (purge_leftover_restore_dirs leaves it alone).
+                keep_staging = True
                 hint = (" " + tr("Your previous data is saved in {file}.", file=safety_backup_path.name)
                         if safety_backup_path else "")
-                raise BackupError(tr("Restore failed while replacing files: {error}.", error=exc) + hint) from exc
+                raise BackupError(failed + " " + tr(
+                    "Your data could not be put back completely. Stop the app; what was there before is in "
+                    "the folder {folder}.", folder=staging_root / _PREVIOUS) + hint) from exc
         finally:
-            shutil.rmtree(staging_root, ignore_errors=True)
+            if not keep_staging:
+                shutil.rmtree(staging_root, ignore_errors=True)
 
         # an older backup lacks what newer versions work out on start-up
         from app.services.location_service import refresh_outdated_locations
@@ -430,10 +511,20 @@ def restore_from_backup(zip_path: Path, confirm: bool) -> RestoreResult:
 
 def purge_leftover_restore_dirs() -> None:
     """On start-up: folders a restore or backup interrupted by a crash left
-    behind (each may hold a full copy of the database)."""
+    behind (each may hold a full copy of the database). A restore that
+    stopped while replacing files — or could not undo that — still holds the
+    database and documents it was replacing: that folder stays, and is named."""
     for path in settings.data_dir.glob(".restore-*"):
-        if path.is_dir():
-            shutil.rmtree(path, ignore_errors=True)
+        if not path.is_dir():
+            continue
+        previous = path / _PREVIOUS
+        if previous.is_dir() and any(previous.iterdir()):
+            logger.warning(
+                "A restore did not finish. The database and documents it was replacing are kept in %s — "
+                "check your data, then delete that folder.", previous,
+            )
+            continue
+        shutil.rmtree(path, ignore_errors=True)
     for path in settings.data_dir.glob("tmp*"):
         if path.is_dir() and (path / "finance.db").exists():
             shutil.rmtree(path, ignore_errors=True)

@@ -372,3 +372,64 @@ def test_an_ordinary_purchase_near_the_amount_is_not_suggested(session, checking
 
     found = [tx.id for tx, _ in find_candidate_bank_debits(session, stmt)]
     assert found == [bill.id]
+
+
+def _statement_of_50(session, credit_card_account):
+    imp = _make_import(session, credit_card_account.id)
+    _add_cc_transaction(session, credit_card_account.id, imp.id, 2, -5000)
+    return _make_statement(session, credit_card_account.id, imp.id, total_minor=5000)
+
+
+def test_a_purchase_of_exactly_the_bill_is_not_linked_without_asking(session, checking_account, credit_card_account):
+    """50.00 at the cash machine in the days after a 50.00 card bill: linked,
+    it would be a transfer and stop counting as an expense. It is suggested
+    (the amount fits) — the user decides."""
+    from app.reconciliation.engine import find_exact_match, get_suggested_payments
+
+    stmt = _statement_of_50(session, credit_card_account)
+    cash = _add_bank_debit(session, checking_account.id, 14, -5000, description="Geldautomat Hauptbahnhof")
+    cash.category = "Cash"  # as the rules sort it on import
+    session.add(cash)
+    session.commit()
+
+    rec = reconcile_statement(session, stmt.id, auto_match=True)
+
+    assert rec.status.value == "pending" and rec.bank_debit_transaction_id is None
+    session.refresh(cash)
+    assert not cash.is_transfer and cash.transaction_type == TransactionType.EXPENSE and cash.category == "Cash"
+    assert [tx.id for tx in get_suggested_payments(session, stmt)] == [cash.id]
+    assert find_exact_match(session, stmt).id == cash.id  # still the one recommended
+
+    # the user's choice links it all the same
+    rec = reconcile_statement(session, stmt.id, bank_debit_transaction_id=cash.id)
+    assert rec.status.value == "reconciled"
+
+
+def test_an_unsorted_or_card_bill_debit_of_exactly_the_bill_is_linked(session, checking_account, credit_card_account):
+    """An issuer's debit no rule knows stays unsorted; one a rule knows is a "Card bills" booking."""
+    for category in ("Other Expense", "Card bills", None):
+        stmt = _statement_of_50(session, credit_card_account)
+        debit = _add_bank_debit(session, checking_account.id, 14, -5000, description=f"Issuer Bank S.A. {category}")
+        debit.category = category
+        session.add(debit)
+        session.commit()
+
+        rec = reconcile_statement(session, stmt.id, auto_match=True)
+
+        # (a linked debit is no candidate for the next round's statement)
+        assert rec.bank_debit_transaction_id == debit.id, category
+
+
+def test_a_debit_the_user_left_unsorted_by_hand_is_not_linked_without_asking(session, checking_account, credit_card_account):
+    from app.db.models import UserCorrection
+
+    stmt = _statement_of_50(session, credit_card_account)
+    debit = _add_bank_debit(session, checking_account.id, 14, -5000, description="Max Mustermann")
+    debit.category = "Other Expense"
+    session.add(debit)
+    session.add(UserCorrection(transaction_id=debit.id, field="category", old_value="Shopping", new_value="Other Expense"))
+    session.commit()
+
+    rec = reconcile_statement(session, stmt.id, auto_match=True)
+
+    assert rec.bank_debit_transaction_id is None

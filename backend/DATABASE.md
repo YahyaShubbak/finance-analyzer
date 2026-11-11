@@ -42,6 +42,23 @@ INFO  [alembic.runtime.migration] Running stamp_revision  -> <revision>
 INFO  [alembic.runtime.migration] Running upgrade <revision> -> <next>, ...
 ```
 
+## A copy before every upgrade
+
+SQLite can't undo a schema change that stopped half-way (Alembic runs its
+DDL outside a transaction there): after a full disk or a killed process the
+database may hold part of a migration without its version stamp, and every
+later start fails on it. So before the app upgrades its own database on
+start-up, it copies it to the backups folder as
+`pre-upgrade-<revision>-<time>.db` (`run_migrations_to_head` in
+`app/db/migrate.py`; SQLite's backup API, checked with `integrity_check`).
+The newest three such copies are kept. No copy is made for a new database
+or one that is already up to date, and if the copy can't be made the
+upgrade doesn't start.
+
+To go back after a failed upgrade: stop the app, install its previous
+version, and put the copy in place of `finance.db` (remove `finance.db-wal`
+and `finance.db-shm` next to it, if present).
+
 ## Restoring backups from older versions
 
 A restored backup is extracted to a temporary folder and migrated to the

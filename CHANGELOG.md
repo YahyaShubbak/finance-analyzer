@@ -5,6 +5,38 @@ All notable changes to this project are listed here. Versions follow
 change behaviour or the database schema (migrations run automatically on
 start — back up your data before updating).
 
+## Unreleased
+
+### Fixed
+- "Undo" on an import card could remove a different import: after its own
+  import had been removed in the list (the next import got the same
+  number), or after a backup was restored. A card now only offers "Undo"
+  while its import is in the list, restoring a backup clears the cards, and
+  an import's number is never given to a later import (schema change).
+- Running the installer again removed settings added to `finance.env` by
+  hand (`FINANCE_HOST`, `FINANCE_IMPORTS_DIR`, `FINANCE_BACKUPS_DIR`, ...),
+  so after an update the app looked for backups and originals in another
+  folder. They are kept now.
+- A restore that failed while replacing files (e.g. an original document
+  open in another program) could leave the restored database next to the
+  previous documents. Replacing is all or nothing now: on a failure the
+  previous database and documents are put back.
+- A bank debit that happened to have exactly a card statement's amount was
+  linked as that statement's payment — and so stopped counting as an
+  expense — even when it was already sorted as a purchase (a cash
+  withdrawal, groceries). Such a debit is now only suggested on the
+  Reconciliation page; unsorted debits and card bills are linked as before.
+- A file a reader could not cope with (e.g. a spreadsheet with a damaged
+  sheet) ended in "Internal Server Error" and left the upload in the
+  staging folder. It is now reported as unreadable, with the cause in the
+  log. An import that failed while being stored no longer leaves the copy
+  of the statement in the imports folder.
+
+### Added
+- Before the database schema is upgraded on start-up, a copy of the
+  database is kept in the backups folder (`pre-upgrade-….db`, the newest
+  three): an upgrade that stops half-way can't be undone by SQLite itself.
+
 ## 0.8.0 — first public release
 
 ### Importing

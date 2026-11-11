@@ -137,7 +137,7 @@ export const HELP_EN: HelpSection[] = [
         title: "Statement and bank debit",
         body: [
           "The purchases on the card statement are the actual expenses. The debit of the statement from your checking account is a transfer — the app links the two so nothing is counted twice.",
-          "They are linked automatically only if exactly one debit has exactly the statement amount. Otherwise the Reconciliation page suggests matching debits for you to confirm.",
+          "They are linked automatically only if exactly one debit has exactly the statement amount — and isn't already sorted as a purchase (say, \"Cash\" or \"Groceries\"): once linked, it no longer counts as an expense. Otherwise the Reconciliation page suggests matching debits for you to confirm.",
           "If you haven't imported any statements for a card, its debit from checking counts as an expense in the category “Card bills” — so the spending isn't lost.",
         ],
         link: { to: "/reconciliation", label: "Go to Reconciliation" },

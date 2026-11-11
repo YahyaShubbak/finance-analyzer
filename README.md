@@ -124,7 +124,9 @@ chosen language.
 Your data lives outside the program folder, so an update never touches it.
 Make a backup first anyway (**Settings → Backup**): updates may change the
 database schema, and that can't be undone by going back to an older
-version.
+version. (Before it changes the schema, the app also puts a copy of the
+database into the backups folder by itself — `pre-upgrade-….db`, the newest
+three are kept. A backup holds your original documents as well.)
 
 - **From a git checkout:** `git pull`, then run the installer again
   (`./install.sh` / `install.bat` — it installs the new package versions and
@@ -157,6 +159,7 @@ running.
 ## Settings (`finance.env`)
 
 Written by the installer; you can also edit it and restart the app.
+Settings you add yourself are kept when the installer runs again.
 Environment variables with the same names take precedence.
 
 | Setting | Meaning |
@@ -230,8 +233,9 @@ Environment variables with the same names take precedence.
   treated as that bill's statement. A bill whose purchases aren't imported
   is an expense of its own ("Card bills"). The payment is
   linked automatically only if exactly one bank debit has exactly the
-  statement amount; otherwise the app suggests candidates for you to
-  confirm on the Reconciliation page. Cards without statements (e.g. a
+  statement amount and isn't already sorted as a purchase (a cash
+  withdrawal of the same amount stays an expense); otherwise the app
+  suggests candidates for you to confirm on the Reconciliation page. Cards without statements (e.g. a
   card account with its own IBAN): money paid onto the card is recognized
   as a transfer and paired with the bank account's debit, refunds are not.
 - **Transfers** between your own accounts are excluded from income and

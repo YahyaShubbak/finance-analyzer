@@ -547,6 +547,19 @@ if ($KeepLegacy) {
 }
 $lines += "FINANCE_PORT=$parsedPort"
 $lines += "FINANCE_OPEN_BROWSER=" + $OpenBrowser.ToString().ToLowerInvariant()
+# Everything in finance.env that this script doesn't write itself is kept:
+# settings added by hand as the README describes (FINANCE_HOST,
+# FINANCE_IMPORTS_DIR, FINANCE_BACKUPS_DIR, ...) and the user's own comments.
+# Without them the app would look for backups and originals in another
+# folder after an update.
+if (Test-Path -LiteralPath $ConfigFile) {
+    $managed = '^(FINANCE_DATA_DIR|FINANCE_PORT|FINANCE_OPEN_BROWSER|FINANCE_KEEP_DATA_IN_PROGRAM_FOLDER)='
+    $ownComment = '^# (Local Finance Analyzer settings |Re-run .* to change them, or edit this file)'
+    # (names in any case, as the app reads them; a byte order mark is dropped)
+    $lines += @(Get-Content -LiteralPath $ConfigFile -Encoding UTF8 |
+        ForEach-Object { $_.TrimStart([char]0xFEFF) } |
+        Where-Object { $_ -notmatch $managed -and $_ -notmatch $ownComment })
+}
 # UTF-8 without BOM (Set-Content -Encoding UTF8 would add one in PowerShell 5.1).
 # Written to a temp file and moved over the old one: after a data move the
 # old database is gone, so a half-written finance.env (disk full, power cut)

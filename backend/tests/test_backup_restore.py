@@ -12,6 +12,8 @@ import io
 import json
 import zipfile
 
+import pytest
+
 from tests.pdf_fixtures import write_text_pdf
 
 
@@ -341,3 +343,131 @@ def test_restored_database_passes_alembic_check(client, tmp_path):
     cfg.set_main_option("script_location", str(REPO_ROOT / "backend" / "app" / "db" / "migrations"))
     cfg.set_main_option("sqlalchemy.url", settings.database_url)
     command.upgrade(cfg, "head")  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# 9. Replacing the files is all or nothing
+# ---------------------------------------------------------------------------
+
+def _current_state(client) -> dict:
+    """What a failed restore must leave exactly as it was: the bookings, the
+    imports, and the stored original documents (names and contents)."""
+    from app.config import settings
+
+    return {
+        "transactions": sorted(t["id"] for t in client.get("/api/transactions", params={"page_size": 500}).json()["items"]),
+        "imports": sorted((i["id"], i["filename"]) for i in client.get("/api/imports").json()),
+        "documents": {
+            path.relative_to(settings.imports_dir).as_posix(): path.read_bytes()
+            for path in sorted(settings.imports_dir.rglob("*")) if path.is_file()
+        },
+    }
+
+
+def _backup_then_change(client, tmp_path) -> tuple[bytes, dict, dict]:
+    """(a backup, the state it holds, the different state the app is in now)."""
+    _build_rich_scenario(client, tmp_path)
+    backup_bytes = _download_backup(client, client.post("/api/backup/create").json()["filename"])
+    backed_up = _current_state(client)
+    client.delete(f"/api/imports/{client.get('/api/imports').json()[0]['id']}")
+    now = _current_state(client)
+    assert now != backed_up and now["documents"] != backed_up["documents"]
+    return backup_bytes, backed_up, now
+
+
+def _break_file_step(monkeypatch, step: str, also_putting_back: bool = False):
+    """Make one step of replacing the files fail the way Windows does when a
+    file is open in another program."""
+    import os
+    import shutil
+
+    from app.config import settings
+
+    real_move, real_replace = shutil.move, os.replace
+    moves = []
+
+    def move(src, dst, *args, **kwargs):
+        moves.append((src, dst))
+        failing = {"move the current documents away": 1, "put the restored documents in place": 2}.get(step)
+        if len(moves) == failing or (also_putting_back and len(moves) > 2):
+            raise PermissionError(13, "The process cannot access the file because it is being used by another process")
+        return real_move(src, dst, *args, **kwargs)
+
+    def replace(src, dst, *args, **kwargs):
+        from pathlib import Path
+
+        staged_database = Path(src).parent.name.startswith(".restore-") and Path(dst) == settings.database_path
+        if step == "put the restored database in place" and staged_database:
+            raise PermissionError(13, "The process cannot access the file because it is being used by another process")
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "move", move)
+    monkeypatch.setattr(os, "replace", replace)
+
+
+@pytest.mark.parametrize("step", [
+    "move the current documents away",
+    "put the restored documents in place",
+    "put the restored database in place",
+])
+def test_restore_that_fails_while_replacing_files_changes_nothing(client, tmp_path, monkeypatch, step):
+    from app.config import settings
+
+    backup_bytes, backed_up, before = _backup_then_change(client, tmp_path)
+
+    with monkeypatch.context() as broken:
+        _break_file_step(broken, step)
+        r = _restore(client, backup_bytes)
+
+    assert r.status_code == 400
+    assert "Nothing was changed" in r.json()["detail"]
+    # database AND documents are the ones from before — never one without the other
+    assert _current_state(client) == before
+    assert list(settings.data_dir.glob(".restore-*")) == []
+
+    # ... and once the file is free again, the same restore goes through
+    r = _restore(client, backup_bytes)
+    assert r.status_code == 200, r.text
+    assert _current_state(client) == backed_up
+
+
+def test_restore_that_cannot_be_undone_keeps_what_it_replaced_and_says_where(client, tmp_path, monkeypatch):
+    from app.config import settings
+    from app.services.backup_service import purge_leftover_restore_dirs
+
+    backup_bytes, _backed_up, before = _backup_then_change(client, tmp_path)
+
+    with monkeypatch.context() as broken:
+        _break_file_step(broken, "put the restored documents in place", also_putting_back=True)
+        r = _restore(client, backup_bytes)
+
+    assert r.status_code == 400
+    detail = r.json()["detail"]
+    [kept] = settings.data_dir.glob(".restore-*")
+    assert "could not be put back completely" in detail and str(kept / "previous") in detail
+    assert "pre-restore-safety-" in detail  # the complete way back
+    # the documents that were moved away are still there, complete
+    documents = {
+        path.relative_to(kept / "previous" / "imports").as_posix(): path.read_bytes()
+        for path in (kept / "previous" / "imports").rglob("*") if path.is_file()
+    }
+    assert documents == before["documents"]
+    # the database was not touched
+    assert _current_state(client)["transactions"] == before["transactions"]
+    # ... and the next start-up doesn't clean that folder away
+    purge_leftover_restore_dirs()
+    assert (kept / "previous" / "imports").is_dir()
+
+
+def test_leftover_folder_of_an_interrupted_restore_without_replaced_files_is_removed(client):
+    from app.config import settings
+    from app.services.backup_service import purge_leftover_restore_dirs
+
+    leftover = settings.data_dir / ".restore-0123456789abcdef"
+    (leftover / "imports").mkdir(parents=True)
+    (leftover / "finance.db").write_bytes(b"a staged copy")
+    (leftover / "previous").mkdir()  # nothing was moved there yet
+
+    purge_leftover_restore_dirs()
+
+    assert not leftover.exists()

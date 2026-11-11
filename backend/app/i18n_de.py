@@ -219,6 +219,17 @@ DE: dict[str, str] = {
         "Die Datenbank dieser Sicherung konnte nicht auf die aktuelle Version gebracht werden: {error}",
     "Restore failed while replacing files: {error}.": "Die Wiederherstellung ist beim Ersetzen der Dateien fehlgeschlagen: {error}.",
     "Your previous data is saved in {file}.": "Ihre bisherigen Daten sind in {file} gesichert.",
+    "This file could not be read: the reader ran into a problem it doesn't know ({error}). "
+    "Nothing was imported.":
+        "Diese Datei konnte nicht gelesen werden: Beim Lesen trat ein unbekanntes Problem auf ({error}). "
+        "Es wurde nichts importiert.",
+    "The original document could not be stored ({error}). Nothing was imported.":
+        "Das Originaldokument konnte nicht gespeichert werden ({error}). Es wurde nichts importiert.",
+    "Nothing was changed: your data is as it was before.": "Es wurde nichts geändert: Ihre Daten sind wie zuvor.",
+    "Your data could not be put back completely. Stop the app; what was there before is in "
+    "the folder {folder}.":
+        "Ihre Daten konnten nicht vollständig zurückgestellt werden. Beenden Sie die App; der vorherige Stand "
+        "liegt im Ordner {folder}.",
     "Some rows of this file now look like transactions that are already imported. "
     "Please check the preview and import it yourself.":
         "Einige Zeilen dieser Datei sehen inzwischen wie bereits importierte Buchungen aus. "

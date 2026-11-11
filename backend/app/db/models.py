@@ -97,6 +97,10 @@ class Account(SQLModel, table=True):
 
 class ImportRecord(SQLModel, table=True):
     __tablename__ = "imports"
+    # An id is never given twice: "Undo"/"Remove" name an import by its id,
+    # and a window still showing a removed import must not hit a newer one
+    # that got the same id (SQLite otherwise reuses the highest id).
+    __table_args__ = {"sqlite_autoincrement": True}
 
     id: Optional[int] = Field(default=None, primary_key=True)
     filename: str

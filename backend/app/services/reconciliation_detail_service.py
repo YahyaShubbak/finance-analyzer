@@ -17,7 +17,7 @@ from app.reconciliation.engine import (
     ReconciliationError,
     compute_reconciliation,
     current_bank_payment,
-    find_automatic_match,
+    find_exact_match,
     get_suggested_payments,
     statement_transaction_ids,
 )
@@ -74,7 +74,8 @@ def build_reconciliation_detail(session: Session, statement_id: int) -> Reconcil
         bank_payment = BankPaymentInfo(status="matched", transaction=_to_brief(session, bank_tx, accounts_by_id))
     else:
         candidates = get_suggested_payments(session, statement)
-        automatic = find_automatic_match(session, statement)
+        # (recommended also when it is not linked without asking: a debit sorted as a purchase)
+        automatic = find_exact_match(session, statement)
         if candidates:
             bank_payment = BankPaymentInfo(
                 status="suggested",

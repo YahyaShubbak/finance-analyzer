@@ -410,6 +410,19 @@ if [ "$MOVE_LEGACY" = true ]; then
 fi
 
 quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/\\\\'/g")"; }
+# Everything in finance.env that this script doesn't write itself: settings
+# added by hand as the README describes (FINANCE_HOST, FINANCE_IMPORTS_DIR,
+# FINANCE_BACKUPS_DIR, ...) and the user's own comments. Without them the
+# app would look for backups and originals in another folder after an update.
+kept_settings() {
+  [ -f "$CONFIG_FILE" ] || return 0
+  # (names in any case, as the app reads them; a UTF-8 byte order mark and
+  # Windows line ends are dropped)
+  LC_ALL=C sed "1s/^$(printf '\357\273\277')//" "$CONFIG_FILE" | tr -d '\r' \
+    | grep -v -i -E '^(FINANCE_DATA_DIR|FINANCE_PORT|FINANCE_OPEN_BROWSER|FINANCE_KEEP_DATA_IN_PROGRAM_FOLDER)=' \
+    | grep -v -E '^# (Local Finance Analyzer settings |Re-run .* to change them, or edit this file)' \
+    || true
+}
 {
   echo "# Local Finance Analyzer settings — written by install.sh on $(date '+%Y-%m-%d %H:%M')."
   echo "# Re-run ./install.sh to change them, or edit this file and restart the app."
@@ -421,6 +434,7 @@ quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/\\\\'/g")"; }
   fi
   echo "FINANCE_PORT=$PORT"
   echo "FINANCE_OPEN_BROWSER=$OPEN_BROWSER"
+  kept_settings
 } > "$CONFIG_FILE.tmp"
 # Moved over the old file in one step: after a data move the old database is
 # gone, so a half-written finance.env (disk full, power cut) would lose

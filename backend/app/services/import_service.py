@@ -67,11 +67,21 @@ def build_importer_for(path: Path, original_filename: str | None = None, options
 
 
 def parse_file(path: Path, original_filename: str | None = None, options: ParseOptions | None = None) -> ParsedImport:
-    """Produce a preview without touching the database."""
+    """Produce a preview without touching the database.
+
+    A reader that stumbles over an unusual file (anything it doesn't report
+    itself as an issue of the preview) raises ImportServiceError: the user
+    is told the file could not be read, the cause goes to the log."""
     importer = build_importer_for(path, original_filename, options)
     if not importer.can_handle():
         raise ImportServiceError(tr("Importer cannot handle file: {path}", path=path))
-    return importer.parse()
+    try:
+        return importer.parse()
+    except Exception as exc:  # noqa: BLE001 — whatever a reader didn't foresee
+        logger.exception("Could not read %s", original_filename or path.name)
+        raise ImportServiceError(tr(
+            "This file could not be read: the reader ran into a problem it doesn't know ({error}). "
+            "Nothing was imported.", error=type(exc).__name__)) from exc
 
 
 def statement_already_imported(session: Session, parsed: ParsedImport, account: Account) -> str | None:

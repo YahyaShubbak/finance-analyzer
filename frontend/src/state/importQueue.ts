@@ -1,11 +1,13 @@
 import { useSyncExternalStore } from "react";
-import type { ImportCommitResult, ImportPreview } from "../types";
+import type { ImportCommitResult, ImportPreview, ImportRecord } from "../types";
 
 /** What an import card has reached, so it is still there after visiting
  * another page (the card itself is unmounted meanwhile). */
 export interface CardSnapshot {
   preview?: ImportPreview;
   committed?: ImportCommitResult;
+  /** the list of imports has shown `committed` — from then on, its absence means it is gone */
+  seenInHistory?: boolean;
   autoImported?: boolean;
   /** the user took over (chose an account, undid an import): no automatic import */
   manual?: boolean;
@@ -56,7 +58,18 @@ export function saveSnapshot(key: string, patch: CardSnapshot) {
   emit();
 }
 
-/** Everything was reset: no card refers to the old data any more. */
+/** Is the import a card made still in the list of imports? A card outlives
+ * its import: the import may be removed in the list (or in another window),
+ * and a restored backup brings other imports with it. Its number alone
+ * doesn't tell — a later import can get the number of a removed one — so the
+ * file name must be the card's too. "Undo" asks the server to remove the
+ * import with that number, so it is only offered while this holds. */
+export function isSameImport(committed: ImportCommitResult, imports: ImportRecord[] | undefined): boolean {
+  return Boolean(imports?.some((r) => r.id === committed.import_id && r.filename === committed.filename));
+}
+
+/** Everything was reset or replaced (a restored backup): no card refers to
+ * the data there is now. */
 export function clearQueue() {
   queue = [];
   emit();

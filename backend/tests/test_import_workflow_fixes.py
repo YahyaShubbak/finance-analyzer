@@ -173,3 +173,159 @@ def test_credit_card_statement_on_checking_account_is_refused(client, tmp_path):
     assert preview["has_errors"] is True
     assert "credit-card statement" in preview["issues"][0]["message"]
     assert _commit(client, preview, account_id).status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# Files a reader stumbles over, and imports that fail half-way
+# ---------------------------------------------------------------------------
+
+_CSV = b"Date,Description,Amount\n2026-02-01,X,-1.00\n"
+
+
+def _staged_files():
+    from app.config import settings
+
+    return sorted(p.name for p in settings.staging_dir.iterdir())
+
+
+def _stored_documents():
+    from app.config import settings
+
+    return sorted(p.name for p in settings.imports_dir.iterdir())
+
+
+def test_a_spreadsheet_with_a_damaged_sheet_is_explained_not_a_crash(client, tmp_path):
+    """The workbook opens (its list of sheets is fine); the sheet's rows are
+    only read later — and end in the middle of a cell."""
+    import zipfile
+
+    from tests.xlsx_fixtures import write_xlsx
+
+    intact = write_xlsx(tmp_path / "intact.xlsx", ["Date", "Description", "Amount"],
+                        [["2026-02-01", f"Shop {i}", -1.5] for i in range(50)])
+    damaged = io.BytesIO()
+    with zipfile.ZipFile(intact) as src, zipfile.ZipFile(damaged, "w", zipfile.ZIP_DEFLATED) as dst:
+        for info in src.infolist():
+            data = src.read(info)
+            dst.writestr(info, data[: len(data) // 2] if info.filename.startswith("xl/worksheets/") else data)
+
+    account_id = _create_account(client)
+    r = client.post("/api/imports/preview", data={"account_id": account_id}, files={"file": (
+        "damaged.xlsx", io.BytesIO(damaged.getvalue()),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+
+    assert r.status_code == 200, r.text
+    preview = r.json()
+    assert preview["has_errors"] is True and preview["transaction_count"] == 0
+    assert "Could not open the spreadsheet" in preview["issues"][0]["message"]
+
+
+def test_a_file_a_reader_stumbles_over_is_explained_and_not_kept(client, monkeypatch):
+    from app.importers.csv_importer import CSVImporter
+
+    def stumble(_self):
+        raise KeyError("a column the reader took for granted")
+
+    monkeypatch.setattr(CSVImporter, "parse", stumble)
+    account_id = _create_account(client)
+
+    for data in ({"account_id": account_id}, {}):  # with the account chosen, and to be recognized
+        r = client.post("/api/imports/preview", files={"file": ("a.csv", io.BytesIO(_CSV), "text/csv")}, data=data)
+        assert r.status_code == 422, r.text
+        assert "could not be read" in r.json()["detail"] and "KeyError" in r.json()["detail"]
+        # nobody knows its staging id: the uploaded statement must not lie around until the purge
+        assert _staged_files() == []
+
+    r = client.post("/api/imports/preview", files={"file": ("a.csv", io.BytesIO(_CSV), "text/csv")},
+                    data={"account_id": account_id}, headers={"Accept-Language": "de"})
+    assert "konnte nicht gelesen werden" in r.json()["detail"]
+
+
+def test_reading_an_uploaded_file_again_fails_with_a_message_and_keeps_the_upload(client, monkeypatch):
+    from app.importers.csv_importer import CSVImporter
+
+    account_id = _create_account(client)
+    preview = _preview(client, "a.csv", _CSV, account_id)
+    staged = _staged_files()
+
+    def stumble(_self):
+        raise IndexError("list index out of range")
+
+    with monkeypatch.context() as broken:
+        broken.setattr(CSVImporter, "parse", stumble)
+        reparse = client.post(f"/api/imports/{preview['staging_id']}/reparse",
+                              json={"account_id": account_id, "options": {"decimal_separator": ","}})
+        assert reparse.status_code == 422 and "IndexError" in reparse.json()["detail"]
+        assert client.post(f"/api/imports/{preview['staging_id']}/recognize").status_code == 422
+        assert _commit(client, preview, account_id).status_code == 422
+
+    # the file is still there: other options, or another try, can go on
+    assert _staged_files() == staged
+    assert _stored_documents() == []
+
+
+def test_an_import_that_fails_leaves_no_statement_without_an_import(client, monkeypatch):
+    import pytest
+
+    from app.api.routes import imports as imports_route
+
+    account_id = _create_account(client)
+    preview = _preview(client, "statement.csv", _CSV, account_id)
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("database is locked")
+
+    with monkeypatch.context() as broken:
+        broken.setattr(imports_route, "commit_parsed_import", fail)
+        with pytest.raises(RuntimeError, match="database is locked"):
+            _commit(client, preview, account_id)
+
+    assert _stored_documents() == []  # the copy made before the database commit is gone again
+    assert client.get("/api/imports").json() == []
+    # ... and the same preview can still be imported
+    assert _commit(client, preview, account_id).status_code == 200
+    assert len(_stored_documents()) == 1
+
+
+def test_the_document_stays_when_the_import_was_stored_before_the_failure(client, monkeypatch):
+    """A failure after the import reached the database must not take its
+    original document away: a stored import always has its file."""
+    import pytest
+
+    from app.api.routes import imports as imports_route
+
+    account_id = _create_account(client)
+    preview = _preview(client, "statement.csv", _CSV, account_id)
+    real_commit = imports_route.commit_parsed_import
+
+    def commit_then_fail(*args, **kwargs):
+        real_commit(*args, **kwargs)
+        raise RuntimeError("after the commit")
+
+    monkeypatch.setattr(imports_route, "commit_parsed_import", commit_then_fail)
+    with pytest.raises(RuntimeError, match="after the commit"):
+        _commit(client, preview, account_id)
+
+    [record] = client.get("/api/imports").json()
+    assert record["filename"] == "statement.csv"
+    assert len(_stored_documents()) == 1
+
+
+def test_a_document_that_cannot_be_stored_is_explained_and_leaves_no_half_copy(client, monkeypatch):
+    from app.api.routes import imports as imports_route
+
+    account_id = _create_account(client)
+    preview = _preview(client, "statement.csv", _CSV, account_id)
+
+    def disk_full(_src, dst):
+        with open(dst, "wb") as half:
+            half.write(b"Date,Descr")
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(imports_route.shutil, "copy2", disk_full)
+    r = _commit(client, preview, account_id)
+
+    assert r.status_code == 500
+    assert "could not be stored" in r.json()["detail"] and "No space left on device" in r.json()["detail"]
+    assert _stored_documents() == []
+    assert client.get("/api/imports").json() == []

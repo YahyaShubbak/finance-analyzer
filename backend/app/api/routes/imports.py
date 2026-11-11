@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 import shutil
 from datetime import UTC
 from pathlib import Path
@@ -76,6 +77,7 @@ from app.services.transfer_detection_service import detect_and_mark_transfers
 from app.services.transfer_marking import retype_card_payments
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
+logger = logging.getLogger("finance")
 
 
 def _account_or_404(session: Session, account_id: int) -> Account:
@@ -92,12 +94,35 @@ def _staged_or_404(staging_id: str) -> Path:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+def _parse(staged_path: Path, options: ParseOptions) -> ParsedImport:
+    """The staged file, read. A file no reader copes with is for the user to
+    hear about (422 with the reason; the cause is logged by parse_file) —
+    not an "Internal Server Error"."""
+    try:
+        return parse_file(staged_path, original_filename=import_staging.original_filename(staged_path), options=options)
+    except ImportServiceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _remove_unreferenced_document(session: Session, path: Path) -> None:
+    """The copy of a statement in the imports folder whose import failed: it
+    must not stay there without an import (never listed, never removed, in
+    every backup). It stays when the import did reach the database — or
+    when that can't be told."""
+    try:
+        session.rollback()
+        if session.exec(select(ImportRecord.id).where(ImportRecord.stored_path == path.name)).first() is None:
+            path.unlink(missing_ok=True)
+    except Exception:  # noqa: BLE001 — the failure that led here is the one to report
+        logger.exception("Could not clean up %s after a failed import", path.name)
+
+
 def _build_preview(
     session: Session, staging_id: str, staged_path: Path, account: Account | None, options: ParseOptions,
     parsed: ParsedImport | None = None, recognition: Recognition | None = None,
 ) -> ImportPreviewResponse:
     if parsed is None:
-        parsed = parse_file(staged_path, original_filename=import_staging.original_filename(staged_path), options=options)
+        parsed = _parse(staged_path, options)
     auto_inverted = False
     if account is not None and options.invert_signs is None and purchases_listed_as_positive(parsed, account):
         # Card exports often list purchases as positive numbers (the issuer's
@@ -105,7 +130,7 @@ def _build_preview(
         # the app's way round — and say so, so it can be undone.
         options = dataclasses.replace(options, invert_signs=True)
         import_staging.save_options(staging_id, options)  # the commit parses exactly the same way
-        parsed = parse_file(staged_path, original_filename=import_staging.original_filename(staged_path), options=options)
+        parsed = _parse(staged_path, options)
         auto_inverted = True
 
     existing = find_existing_import_by_checksum(session, parsed.file_checksum)
@@ -301,16 +326,22 @@ def preview_import(
     import_staging.save_display_name(staging_id, file.filename or "")
     import_staging.save_options(staging_id, parse_options)
 
-    if account is not None:
-        return _build_preview(session, staging_id, staged_path, account, parse_options)
-    return _recognized_preview(session, staging_id, staged_path, parse_options)
+    try:
+        if account is not None:
+            return _build_preview(session, staging_id, staged_path, account, parse_options)
+        return _recognized_preview(session, staging_id, staged_path, parse_options)
+    except Exception:
+        # No preview, so nobody learns the staging id: the uploaded statement
+        # would lie in the staging folder until the purge.
+        import_staging.discard(staging_id)
+        raise
 
 
 def _recognized_preview(session: Session, staging_id: str, staged_path: Path,
                         parse_options: ParseOptions) -> ImportPreviewResponse:
     """The preview with the account recognized from the file, read the way
     the previous file of its kind was read — when the user chose no options."""
-    parsed = parse_file(staged_path, original_filename=import_staging.original_filename(staged_path), options=parse_options)
+    parsed = _parse(staged_path, parse_options)
     ensure_signatures(session)
     recognition = recognize_account(session, parsed, file_signature(staged_path, parsed))
     if recognition is None:
@@ -403,7 +434,7 @@ def commit_import(payload: ImportCommitRequest, session: Session = Depends(get_s
         account = _account_or_404(session, payload.account_id)
 
         options = import_staging.load_options(payload.staging_id)
-        parsed = parse_file(staged_path, original_filename=original_filename, options=options)
+        parsed = _parse(staged_path, options)
         decision_map = {d.source_row_index: d.decision for d in payload.row_decisions}
         if payload.auto and not parsed.has_errors and any(
             c.status == "possible_duplicate"
@@ -421,7 +452,13 @@ def commit_import(payload: ImportCommitRequest, session: Session = Depends(get_s
         settings.ensure_directories()
         stored_name = f"{payload.staging_id[:12]}_{import_staging.sanitize_filename(original_filename)}"
         final_path = settings.imports_dir / stored_name
-        shutil.copy2(staged_path, final_path)
+        try:
+            shutil.copy2(staged_path, final_path)
+        except OSError as exc:  # e.g. the disk is full: no half-written copy stays
+            _remove_unreferenced_document(session, final_path)
+            raise HTTPException(status_code=500, detail=tr(
+                "The original document could not be stored ({error}). Nothing was imported.",
+                error=exc.strerror or type(exc).__name__)) from exc
         try:
             result = commit_parsed_import(
                 session, parsed, payload.account_id, stored_path=stored_name, row_decisions=decision_map,
@@ -429,6 +466,9 @@ def commit_import(payload: ImportCommitRequest, session: Session = Depends(get_s
         except ImportServiceError as exc:
             final_path.unlink(missing_ok=True)
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception:
+            _remove_unreferenced_document(session, final_path)
+            raise
 
         # the next file of this kind is recognized and read the same way
         _seen, verified_before = kind_history(session, signature, account.id)

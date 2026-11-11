@@ -21,7 +21,9 @@ wrong transaction silently deletes a real expense. Therefore:
   `reconcile_statement`.
 * A payment is only linked automatically when it is unambiguous and
   exact (same amount, same currency, not claimed or corrected by the
-  user). Near matches are merely *suggested* for the user to confirm.
+  user) and not already sorted as a purchase (a category other than
+  "Card bills"/"Transfers"/unsorted). Near matches, and exact ones that
+  are known purchases, are merely *suggested* for the user to confirm.
 * Unlinking a payment (choosing another, clearing it, deleting the
   statement) restores the transaction to an ordinary expense.
 
@@ -49,6 +51,7 @@ from app.db.models import (
     utcnow,
 )
 from app.i18n import tr
+from app.normalization.category import UNSORTED_CATEGORIES
 
 DEFAULT_BANK_MATCH_DAY_WINDOW = 15
 # A card's direct debit comes on its due date, often two to three weeks after
@@ -193,9 +196,9 @@ def _pays_onto(session: Session, tx: Transaction, statement: CreditCardStatement
     return partner is not None and partner.account_id == statement.account_id and partner.amount_minor > 0
 
 
-def find_automatic_match(session: Session, statement: CreditCardStatement) -> Transaction | None:
-    """The payment to link without asking: exactly the statement total, and
-    the only such transaction in the usual window."""
+def find_exact_match(session: Session, statement: CreditCardStatement) -> Transaction | None:
+    """The one bank debit of exactly the statement total in the usual window
+    — the payment recommended to the user."""
     exact = [tx for tx, (amount_gap, date_gap) in find_candidate_bank_debits(session, statement)
              if amount_gap == 0 and date_gap <= AUTO_MATCH_MAX_DAY_GAP]
     if len(exact) > 1:
@@ -203,6 +206,29 @@ def find_automatic_match(session: Session, statement: CreditCardStatement) -> Tr
         # debit after this one's end is its own, the one before it pays the previous bill
         exact = [tx for tx in exact if tx.transaction_date >= statement.statement_period_end]
     return exact[0] if len(exact) == 1 else None
+
+
+def _known_to_be_a_purchase(session: Session, tx: Transaction) -> bool:
+    """A rule or the user sorted this debit as something bought or paid for
+    (50.00 at the cash machine, groceries, the rent) — not as a card bill,
+    and not left unsorted as an issuer's debit no rule knows is."""
+    from app.services.transfer_marking import corrected_fields
+
+    if tx.is_transfer or tx.category in CARD_BILL_CATEGORIES:
+        return False
+    if tx.category is not None and tx.category not in UNSORTED_CATEGORIES:
+        return True
+    return (tx.id, "category") in corrected_fields(session, [tx.id])  # left as it is by the user's own choice
+
+
+def find_automatic_match(session: Session, statement: CreditCardStatement) -> Transaction | None:
+    """The payment to link without asking: the exact match — unless it is
+    known to be a purchase. The amount alone is not enough for that: linked,
+    the debit is a transfer and leaves every total, so a purchase that
+    happens to cost what the card's bill is would silently stop counting.
+    Such a debit is still suggested, for the user to confirm."""
+    tx = find_exact_match(session, statement)
+    return tx if tx is not None and not _known_to_be_a_purchase(session, tx) else None
 
 
 def link_pending_payments(session: Session) -> int:
