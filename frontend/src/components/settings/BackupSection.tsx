@@ -1,4 +1,4 @@
-import { Badge, Button, Card } from "../ui";
+import { Badge, Button, Card, ErrorState } from "../ui";
 import { useBackups, useCreateBackup } from "../../hooks/useBackup";
 import { backupDownloadUrl } from "../../api/backup";
 import { formatBytes, formatDateTime } from "../../lib/format";
@@ -8,7 +8,7 @@ import { useI18n } from "../../i18n/useI18n";
 
 export function BackupSection() {
   const { t, tn } = useI18n();
-  const { data: backups, isLoading } = useBackups();
+  const { data: backups, isLoading, isError, error, refetch } = useBackups();
   const create = useCreateBackup();
 
   return (
@@ -31,6 +31,8 @@ export function BackupSection() {
         </div>
       )}
 
+      {/* not an empty list: the backups could not be loaded */}
+      {isError && !backups && <ErrorState error={error} onRetry={() => refetch()} />}
       {!isLoading && backups && backups.length === 0 && (
         <div className="px-5 py-6 text-sm text-ink-muted">{t("backup.none")}</div>
       )}

@@ -52,6 +52,14 @@ export function Transactions() {
     page_size: PAGE_SIZE,
   });
 
+  // The last booking of the last page moved away (sorted into another
+  // category, removed): show the page before. Set while rendering, so an
+  // empty table under "Page 3 of 2" is never shown.
+  const total = query.data?.total ?? 0;
+  if (query.data && page > 1 && (page - 1) * PAGE_SIZE >= total) {
+    setPage(Math.max(1, Math.ceil(total / PAGE_SIZE)));
+  }
+
   function handleFilterChange(patch: Parameters<typeof updateFilters>[0]) {
     updateFilters(patch);
     setPage(1);
