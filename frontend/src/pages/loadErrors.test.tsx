@@ -7,6 +7,8 @@ import { Accounts } from "./Accounts";
 import { Budgets } from "./Budgets";
 import { CreditCards } from "./CreditCards";
 import { ImportHistory } from "../components/imports/ImportHistory";
+import { BackupSection } from "../components/settings/BackupSection";
+import { LearnedRulesSection } from "../components/settings/LearnedRulesSection";
 import { LanguageProvider } from "../i18n/LanguageProvider";
 import { ApiError, apiGet } from "../api/client";
 
@@ -47,6 +49,18 @@ describe("a list that could not be loaded", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("The app is not running.");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(screen.queryByText(emptyText)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["backups", <BackupSection key="backups" />],
+    ["learned rules", <LearnedRulesSection key="rules" />],
+  ] as [string, ReactElement][])("%s (settings): says so, instead of showing nothing", async (_name, section) => {
+    vi.mocked(apiGet).mockImplementation(async () => {
+      throw new ApiError(0, "The app is not running.");
+    });
+    show(section);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The app is not running.");
   });
 
   it.each(PAGES)("%s: still says there is nothing when that is what was loaded", async (_name, page, emptyText) => {

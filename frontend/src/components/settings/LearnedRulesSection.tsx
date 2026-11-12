@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Card } from "../ui";
+import { Button, Card, ErrorState } from "../ui";
 import { useForgetCategoryRule, useLearnedCategoryRules } from "../../hooks/useRules";
 import { categoryLabel } from "../../lib/categories";
 import { formatDateTime } from "../../lib/format";
@@ -8,7 +8,7 @@ import { useI18n } from "../../i18n/useI18n";
 /** What the app learned from category assignments — visible, and undoable. */
 export function LearnedRulesSection() {
   const { t, tn } = useI18n();
-  const { data: rules, isLoading } = useLearnedCategoryRules();
+  const { data: rules, isLoading, isError, error, refetch } = useLearnedCategoryRules();
   const forget = useForgetCategoryRule();
   const [message, setMessage] = useState<string | null>(null);
 
@@ -20,6 +20,8 @@ export function LearnedRulesSection() {
         {message && <p className="text-xs text-income mt-2">{message}</p>}
         {forget.isError && <p className="text-xs text-danger mt-2">{(forget.error as Error).message}</p>}
       </div>
+      {/* not an empty list: the rules could not be loaded */}
+      {isError && !rules && <ErrorState error={error} onRetry={() => refetch()} />}
       {!isLoading && rules && rules.length === 0 && (
         <div className="px-5 py-6 text-sm text-ink-muted">{t("learned.empty")}</div>
       )}
