@@ -8,26 +8,24 @@ Tests und die Doku im Repo sind Englisch.
 
 Ein Architektur-Audit des Repos (Version 0.8.0) hat 15 größere Befunde
 (Nr. 1–15) und eine Tabelle kleiner „Quick Wins“ ergeben. Erledigt und
-getestet sind die Befunde 1–9, 12 und großteils 14 sowie ein Teil der Quick Wins (Abschnitt
-„Quick Wins“). Offen sind die Befunde 10, 11, 13, 15, Reste von 7, 8 und 14 und der Rest der Quick Wins.
+getestet sind die Befunde 1–10, 12 und großteils 14 sowie ein Teil der Quick Wins (Abschnitt
+„Quick Wins“). Offen sind die Befunde 11, 13, 15, Reste von 7, 8 und 14 und der Rest der Quick Wins.
 
 Der Nutzer committet selbst. Die Befunde 1–6 stehen in Commit `68a370d`
 ("Harden imports, restores, and schema upgrades"); der Stand davor war
 `f0a3d0f`. Die neun erledigten Quick Wins sind ebenfalls committet (bis
 `7b5b058`), Befund 12 in `899e8b4`, Befund 14 und die kleinen Frontend-Punkte
-danach. Die Befunde 7–9 lagen am 2026-11-12 noch uncommittet im
-Arbeitsverzeichnis (Commit-Messages im Chat des Nutzers): im Backend
-`app/db/session.py`, `app/reconciliation/engine.py`, `app/api/routes/imports.py`,
-`app/services/` (`backup_service`, `category_memory`, `category_suggestion`,
-`chains`, `duplicate_preview_service`, `import_service`, `rule_service`) und die
-Tests `test_remembered.py`, `test_category_learning.py`,
-`test_duplicate_preview.py`, `test_import_workflow_fixes.py`,
-`test_reconciliation.py`, `test_rule_creation.py`; im Frontend
-`components/imports/ImportFileCard.tsx` (+ Test), `hooks/useImports.ts`,
-`i18n/de.ts`, `i18n/en.ts`, `pages/Imports.tsx`, `state/importQueue.ts`
-(+ Test); dazu `CHANGELOG.md` und `handoff.md`. Vor neuer Arbeit mit
-`git status` prüfen, ob das inzwischen committet ist — wenn nicht, den Nutzer
-darauf hinweisen und diese Dateien nicht anfassen.
+danach, die Befunde 7–9 in `fe7c671` und `2b37ef1`. Befund 10 lag am
+2026-11-12 noch uncommittet im Arbeitsverzeichnis (Commit-Message im Chat des
+Nutzers): im Backend `app/db/models.py`, `app/db/migrate.py`, die neue
+Migration `app/db/migrations/versions/a6f4c2d81e93_raw_row_links_as_columns.py`,
+`app/reconciliation/engine.py`, `app/services/` (`import_service`,
+`import_removal_service`, `location_service`, `points_service`,
+`reset_service`, `twin_merge`) und die Tests `conftest.py`,
+`test_raw_row_links.py` (neu), `test_migrations.py`, `test_points.py`; dazu
+`CHANGELOG.md` und `handoff.md`. Vor neuer Arbeit mit `git status` prüfen, ob
+das inzwischen committet ist — wenn nicht, den Nutzer darauf hinweisen und
+diese Dateien nicht anfassen.
 
 ## Arbeitsweise, die der Nutzer erwartet
 
@@ -50,7 +48,7 @@ Backend (in `backend/`, venv per `uv sync --locked`):
 
 ```
 uv run --locked ruff check app tests
-uv run --locked pytest -q -p no:cacheprovider          # ca. 2,5 min, zuletzt 813 bestanden
+uv run --locked pytest -q -p no:cacheprovider          # ca. 2,5 min, zuletzt 825 bestanden
 FINANCE_DATA_DIR=<leerer Temp-Ordner> uv run --locked alembic upgrade head
 FINANCE_DATA_DIR=<derselbe>           uv run --locked alembic check
 ```
@@ -86,6 +84,13 @@ das ist das `--stop`, kein Fehler.
   `_detect_unversioned_revision` (`backend/app/db/migrate.py`), sonst
   bekommen die Test-Datenbanken (per `create_all` gebaut) eine falsche
   Revision. `alembic check` muss leer bleiben.
+- Die Test-Engines erzwingen Fremdschlüssel wie die echte App
+  (`enforce_foreign_keys` in `tests/conftest.py`). Vorher liefen die Tests
+  ohne `PRAGMA foreign_keys=ON`, die App mit. Wer in einem Test eine eigene
+  Engine baut und Löschpfade prüft, sollte sie ebenfalls damit versehen.
+- Wer Buchungen löscht, muss vorher die Verweise übersprungener Rohzeilen
+  auf sie lösen (`RawTransaction.duplicate_of_transaction_id`, siehe
+  Befund 10) — sonst lehnt SQLite das Löschen ab.
 - `install.ps1` bleibt reines ASCII und muss unter Windows PowerShell 5.1
   laufen. Änderungen an den Installern in beiden Skripten (`install.sh`,
   `install.ps1`) gleich halten.
@@ -119,7 +124,7 @@ gleichem Betrag wird weiterhin automatisch verknüpft. Eine strengere Regel
 („nur was wie eine Kartenabrechnung aussieht“) würde das Verknüpfen für jeden
 Herausgeber abschalten, dessen Abbuchungstext keine Regel kennt.
 
-## Befunde 7–15: Stand (7–9 und 12 erledigt, 14 großteils; offen 10, 11, 13, 15)
+## Befunde 7–15: Stand (7–10 und 12 erledigt, 14 großteils; offen 11, 13, 15)
 
 Zeilennummern stammen vom Audit-Stand und können sich verschoben haben; die
 Funktionsnamen sind verlässlich.
@@ -192,13 +197,42 @@ direkt auf). Vorher → nachher:
   erneute Parse beim Commit — jeder liest mit anderen Optionen bzw. ist
   Absicht („Commit liest dieselben Bytes noch einmal“).
 
-### 10. Relationale Verknüpfungen stecken in JSON-Blobs
-- Wo: `_duplicate_of` und `_kept_by_user` in
-  `RawTransaction.extra_fields_json`, gesucht per `LIKE '%"_duplicate_of"%'`
-  in `location_service.py`, `import_removal_service.py`, `engine.py`
-  (`statement_transaction_ids`), `twin_merge.py`, `points_service.py`.
-- Fix: Migration mit `raw_transactions.duplicate_of_transaction_id`
-  (nullable, indexiert) samt Backfill; die Stellen lesen die Spalte.
+### 10. Relationale Verknüpfungen stecken in JSON-Blobs — erledigt
+- Umgesetzt: `raw_transactions` hat zwei neue Spalten (Migration
+  `a6f4c2d81e93`, Erkennungs-Zweig in `_detect_unversioned_revision`):
+  `duplicate_of_transaction_id` (Fremdschlüssel auf `transactions.id`,
+  indexiert) ersetzt `"_duplicate_of"`, `kept_by_user` ersetzt
+  `"_kept_by_user"` im JSON. Die Migration zieht die Werte aus dem JSON in
+  die Spalten und entfernt sie dort; ein Verweis auf eine nicht mehr
+  vorhandene Buchung wird verworfen; Schlüssel gleichen Namens mit anderem
+  Werttyp (Spalte einer Datei, kein Eintrag der App) bleiben unangetastet.
+  Der Downgrade schreibt die Werte zurück ins JSON.
+- Alle Stellen lesen und schreiben die Spalten: `commit_parsed_import`,
+  `statement_transaction_ids` (`engine.py`), `_row_transactions`
+  (`points_service.py`), `refresh_locations` (lädt nur noch die
+  übersprungenen Zeilen der betroffenen Buchungen statt aller),
+  `_rehome_shared_bookings` / `remove_import`, `find_twins`. Die Konstante
+  `KEPT_BY_USER` gibt es nicht mehr.
+- Folgen des Fremdschlüssels: `raw_transactions` und `transactions`
+  verweisen jetzt gegenseitig aufeinander. Der neue Schlüssel ist deshalb
+  mit `use_alter=True` deklariert (sonst warnt `metadata.sorted_tables`, das
+  der Reset benutzt), und die Beziehungen `RawTransaction.transaction` /
+  `Transaction.raw_transaction` nennen ihren Schlüssel ausdrücklich.
+  `remove_import` löst vor dem Löschen der Buchungen die Verweise der
+  eigenen Zeilen (zwei Zeilen einer Datei standen für dieselbe Buchung),
+  `reset_everything` setzt die Spalte vor dem Leeren der Tabellen auf NULL.
+- Nebenbei: `tests/conftest.py` erzwingt jetzt Fremdschlüssel (siehe
+  „Regeln des Repos“); alle 814 vorher vorhandenen Tests liefen damit ohne
+  Änderung durch.
+- Geprüft außer mit Tests: echte App auf einer Wegwerf-Datenbank im alten
+  Format gestartet (Kopie vor dem Upgrade wurde angelegt, die Buchung zog
+  beim Entfernen der ersten Datei zur zweiten um, danach ließ sich auch die
+  zweite entfernen).
+- Bewusst nicht umgesetzt: `twin_merge` markiert Zwillinge weiter über
+  `Transaction.duplicate_of_id` (war nie im JSON). Die übrigen `_…`-Schlüssel
+  im JSON (`_details`, `_booking_text`, `_merchant_category`,
+  `_counterparty_iban`, `_value_date`) sind Daten der Zeile, keine
+  Verknüpfungen, und bleiben dort.
 
 ### 11. Zyklische Service-Abhängigkeiten (108 funktionslokale Imports)
 - Wo u. a.: `credit_card_service.py` importiert `_to_read` aus

@@ -25,15 +25,28 @@ os.environ.update({
 
 # imported only now, after the environment above (E402 on purpose)
 import pytest  # noqa: E402
+from sqlalchemy import event  # noqa: E402
 from sqlmodel import Session, SQLModel, create_engine  # noqa: E402
 
 from app.db.models import Account, AccountType  # noqa: E402
 
 
+def enforce_foreign_keys(engine):
+    """As the app's own engine does (app.db.session): a test must not pass
+    with a reference the app's database would refuse."""
+    @event.listens_for(engine, "connect")
+    def _on_connect(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    return engine
+
+
 @pytest.fixture()
 def engine(tmp_path):
     db_path = tmp_path / "test_finance.db"
-    eng = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    eng = enforce_foreign_keys(create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False}))
     SQLModel.metadata.create_all(eng)
     return eng
 
@@ -95,7 +108,8 @@ def client(tmp_path, monkeypatch):
     # leave a second, undisposed engine holding a stale connection to the
     # just-replaced file.
     db_path = settings.database_path
-    test_engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    test_engine = enforce_foreign_keys(
+        create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False}))
     SQLModel.metadata.create_all(test_engine)
     monkeypatch.setattr(db_session, "engine", test_engine)
 

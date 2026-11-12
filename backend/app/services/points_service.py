@@ -90,13 +90,8 @@ def _row_transactions(session: Session, import_id: int) -> dict[int, int]:
     for raw in raws:
         if raw.id in by_raw:
             out[raw.source_row_index] = by_raw[raw.id]
-            continue
-        try:
-            target = json.loads(raw.extra_fields_json).get("_duplicate_of") if raw.extra_fields_json else None
-        except (ValueError, AttributeError):
-            target = None
-        if isinstance(target, int):
-            out[raw.source_row_index] = target
+        elif raw.duplicate_of_transaction_id is not None:
+            out[raw.source_row_index] = raw.duplicate_of_transaction_id
     return out
 
 

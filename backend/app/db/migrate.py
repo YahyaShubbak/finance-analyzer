@@ -37,6 +37,7 @@ _MIGRATIONS_DIR = _BACKEND_DIR / "app" / "db" / "migrations"
 # Revisions of the migration chain whose schema a pre-Alembic database may
 # match (see _detect_unversioned_revision). Newest first. Every new
 # migration must add its own check to _detect_unversioned_revision.
+_REV_RAW_ROW_LINKS = "a6f4c2d81e93"
 _REV_IMPORT_IDS = "e3a91f5c7d08"
 _REV_POINTS = "b7d3e9a41c52"
 _REV_IMPORT_SOURCE = "9c2e7d4b1f30"
@@ -74,6 +75,8 @@ def _detect_unversioned_revision(inspector) -> str:
     def columns(table: str) -> set[str]:
         return {c["name"] for c in inspector.get_columns(table)} if table in tables else set()
 
+    if "duplicate_of_transaction_id" in columns("raw_transactions"):
+        return _REV_RAW_ROW_LINKS
     if _has_autoincrement(inspector, "imports"):
         return _REV_IMPORT_IDS
     if "points_entries" in tables:

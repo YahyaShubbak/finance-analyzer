@@ -468,3 +468,127 @@ def test_existing_imports_keep_their_ids_and_rows_when_ids_stop_being_reused(tmp
         conn.execute(text("DELETE FROM imports WHERE id = 7"))
         assert conn.execute(text(_NEW_IMPORT), {"name": "march.csv"}).lastrowid == 8
     engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# A raw row's links to bookings: from its JSON into columns
+# ---------------------------------------------------------------------------
+
+_BEFORE_ROW_LINKS = "e3a91f5c7d08"
+_BOOKING = (
+    "INSERT INTO transactions (id, raw_transaction_id, account_id, transaction_date, normalized_description, "
+    "amount_minor, currency, transaction_type, duplicate_fingerprint, is_duplicate, is_transfer, created_at, "
+    "updated_at) VALUES (:id, :raw, 1, '2026-03-02', 'Shop', -1000, 'EUR', 'EXPENSE', :fp, 0, 0, "
+    "'2026-03-15T00:00:00', '2026-03-15T00:00:00')"
+)
+# raw row id -> the JSON an older version wrote
+_OLD_ROWS = {
+    1: None,                                                    # the booking's own row
+    2: '{"Ort": "Bochum", "_duplicate_of": 10}',                 # skipped: it is booking 10
+    3: '{"_duplicate_of": 10}',                                  # ... with nothing else to say
+    4: '{"_duplicate_of": 999, "Ort": "Köln"}',                  # its booking is gone
+    5: '{"_kept_by_user": true, "_details": "x"}',               # kept by the user: booking 11's row
+    6: '{"_duplicate_of": "10", "_kept_by_user": "yes"}',        # a file's own columns of these names
+    7: 'not json "_duplicate_of"',
+    8: '{"Ort": "Wien"}',
+}
+
+
+def _database_with_old_row_links(db_url):
+    cfg = _alembic_config(db_url)
+    command.upgrade(cfg, _BEFORE_ROW_LINKS)
+    engine = create_engine(db_url)
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO accounts (id, name, account_type, currency, created_at, is_archived) "
+            "VALUES (1, 'Checking', 'CHECKING', 'EUR', '2026-01-01T00:00:00', 0)"
+        ))
+        conn.execute(text(
+            "INSERT INTO imports (id, filename, stored_path, file_checksum, document_type, account_id, imported_at, "
+            "status, detected_transaction_count) VALUES (1, 'a.csv', 'a.csv', 'a', 'BANK_STATEMENT', 1, "
+            "'2026-03-15T00:00:00', 'IMPORTED', 8)"
+        ))
+        for raw_id, extra in _OLD_ROWS.items():
+            conn.execute(text(
+                "INSERT INTO raw_transactions (id, import_id, source_row_index, original_description, "
+                "extra_fields_json) VALUES (:id, 1, :id, 'Shop', :extra)"
+            ), {"id": raw_id, "extra": extra})
+        conn.execute(text(_BOOKING), {"id": 10, "raw": 1, "fp": "a"})
+        conn.execute(text(_BOOKING), {"id": 11, "raw": 5, "fp": "b"})
+    engine.dispose()
+    return cfg
+
+
+def _row_links(db_url) -> dict:
+    engine = create_engine(db_url)
+    with engine.connect() as conn:
+        rows = conn.execute(text(
+            "SELECT id, duplicate_of_transaction_id, kept_by_user, extra_fields_json FROM raw_transactions ORDER BY id"
+        )).fetchall()
+    engine.dispose()
+    return {row[0]: tuple(row[1:]) for row in rows}
+
+
+def test_row_links_move_from_the_json_into_columns(tmp_path):
+    db_url = f"sqlite:///{tmp_path / 'links.db'}"
+    cfg = _database_with_old_row_links(db_url)
+
+    command.upgrade(cfg, "head")
+
+    assert _row_links(db_url) == {
+        1: (None, 0, None),
+        2: (10, 0, '{"Ort": "Bochum"}'),
+        3: (10, 0, None),
+        4: (None, 0, '{"Ort": "Köln"}'),  # no booking 999: not kept as a reference
+        5: (None, 1, '{"_details": "x"}'),
+        6: (None, 0, '{"_duplicate_of": "10", "_kept_by_user": "yes"}'),  # not the app's: untouched
+        7: (None, 0, 'not json "_duplicate_of"'),
+        8: (None, 0, '{"Ort": "Wien"}'),
+    }
+    engine = create_engine(db_url)
+    with engine.begin() as conn:
+        assert "ix_raw_transactions_duplicate_of_transaction_id" in {
+            i["name"] for i in inspect(conn).get_indexes("raw_transactions")}
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+        assert conn.execute(text("PRAGMA foreign_key_check")).fetchall() == []
+        # the bookings still belong to their rows
+        assert conn.execute(text("SELECT id, raw_transaction_id FROM transactions ORDER BY id")).fetchall() == [
+            (10, 1), (11, 5)]
+    engine.dispose()
+
+
+def test_a_database_built_by_migrations_refuses_a_row_naming_a_missing_booking(tmp_path):
+    from sqlalchemy.exc import IntegrityError
+
+    db_url = f"sqlite:///{tmp_path / 'links.db'}"
+    command.upgrade(_database_with_old_row_links(db_url), "head")
+    engine = create_engine(db_url)
+    with engine.connect() as conn:
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+        conn.execute(text("UPDATE raw_transactions SET duplicate_of_transaction_id = 11 WHERE id = 8"))
+        with pytest.raises(IntegrityError):
+            conn.execute(text("UPDATE raw_transactions SET duplicate_of_transaction_id = 999 WHERE id = 8"))
+        with pytest.raises(IntegrityError):  # nor can a booking go while a row names it
+            conn.execute(text("DELETE FROM transactions WHERE id = 11"))
+    engine.dispose()
+
+
+def test_row_links_go_back_into_the_json_on_downgrade(tmp_path):
+    import json
+
+    db_url = f"sqlite:///{tmp_path / 'links.db'}"
+    cfg = _database_with_old_row_links(db_url)
+    command.upgrade(cfg, "head")
+
+    command.downgrade(cfg, _BEFORE_ROW_LINKS)
+
+    engine = create_engine(db_url)
+    with engine.connect() as conn:
+        assert "duplicate_of_transaction_id" not in {c["name"] for c in inspect(conn).get_columns("raw_transactions")}
+        back = dict(conn.execute(text("SELECT id, extra_fields_json FROM raw_transactions")).fetchall())
+    engine.dispose()
+    assert json.loads(back[2]) == {"Ort": "Bochum", "_duplicate_of": 10}
+    assert json.loads(back[3]) == {"_duplicate_of": 10}
+    assert json.loads(back[4]) == {"Ort": "Köln"}  # (the reference to nothing stays dropped)
+    assert json.loads(back[5]) == {"_details": "x", "_kept_by_user": True}
+    assert back[1] is None and back[8] == '{"Ort": "Wien"}'

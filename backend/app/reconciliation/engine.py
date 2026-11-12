@@ -81,20 +81,18 @@ def statement_transaction_ids(session: Session, statement: CreditCardStatement) 
     """The card transactions a statement lists: those imported from it, plus
     those it listed but that had already been imported from another file
     (e.g. the card's CSV export) — its rows were skipped as duplicates and
-    point to them (raw extra field "_duplicate_of")."""
-    rows = session.exec(
-        select(RawTransaction.id, RawTransaction.extra_fields_json).where(RawTransaction.import_id == statement.import_id)
-    ).all()
+    point to them (RawTransaction.duplicate_of_transaction_id)."""
     ids = set(session.exec(
         select(Transaction.id).where(Transaction.raw_transaction_id.in_(
             select(RawTransaction.id).where(RawTransaction.import_id == statement.import_id)
         ))
-    ).all()) if rows else set()
-    for _raw_id, extra_json in rows:
-        if extra_json and '"_duplicate_of"' in extra_json:
-            duplicate_of = json.loads(extra_json).get("_duplicate_of")
-            if isinstance(duplicate_of, int):
-                ids.add(duplicate_of)
+    ).all())
+    ids |= set(session.exec(
+        select(RawTransaction.duplicate_of_transaction_id).where(
+            RawTransaction.import_id == statement.import_id,
+            RawTransaction.duplicate_of_transaction_id != None,  # noqa: E711
+        )
+    ).all())
     # its own rows that were merged into the same booking from another file (twin_merge): that one counts
     for chunk in chunked(list(ids)):
         ids |= {kept for kept in session.exec(select(Transaction.duplicate_of_id).where(

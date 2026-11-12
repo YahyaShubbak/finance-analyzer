@@ -14,6 +14,7 @@ import enum
 from datetime import UTC, date, datetime
 from typing import List, Optional
 
+from sqlalchemy import Column, ForeignKey, Integer
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -145,8 +146,27 @@ class RawTransaction(SQLModel, table=True):
     original_currency_text: Optional[str] = None
     extra_fields_json: Optional[str] = None  # any other columns, as JSON, for traceability
 
+    # A row that was not made a booking because it is one already there
+    # (imported from another file before, see commit_parsed_import): that
+    # booking. A card statement finds its purchases through it, the booking
+    # its place, and it takes the booking over when the other file is removed.
+    # (use_alter: transactions refer to their raw row, too — this reference
+    # is the one left out when the tables are put in order.)
+    duplicate_of_transaction_id: Optional[int] = Field(default=None, sa_column=Column(
+        Integer,
+        ForeignKey("transactions.id", use_alter=True, name="fk_raw_transactions_duplicate_of_transaction_id"),
+        nullable=True, index=True,
+    ))
+    # The user imported this row as a booking of its own although it looked
+    # like one already there: never merged with that one later (twin_merge).
+    kept_by_user: bool = False
+
     import_record: Optional[ImportRecord] = Relationship(back_populates="raw_transactions")
-    transaction: Optional["Transaction"] = Relationship(back_populates="raw_transaction")
+    # (the booking made from this row — not the one it may point at above)
+    transaction: Optional["Transaction"] = Relationship(
+        back_populates="raw_transaction",
+        sa_relationship_kwargs={"foreign_keys": "[Transaction.raw_transaction_id]"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +227,10 @@ class Transaction(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
     account: Optional[Account] = Relationship(back_populates="transactions")
-    raw_transaction: Optional[RawTransaction] = Relationship(back_populates="transaction")
+    raw_transaction: Optional[RawTransaction] = Relationship(
+        back_populates="transaction",
+        sa_relationship_kwargs={"foreign_keys": "[Transaction.raw_transaction_id]"},
+    )
     corrections: List["UserCorrection"] = Relationship(back_populates="transaction")
 
 

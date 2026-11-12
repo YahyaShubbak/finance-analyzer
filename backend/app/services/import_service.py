@@ -167,8 +167,6 @@ class CommitResult:
 # its PDF statement doesn't).
 _ENRICHING_FIELDS = ("_merchant_category", "_booking_text", "_counterparty_iban", "_details")
 _UNCLASSIFIED = {None, *UNSORTED_CATEGORIES}
-#: raw extra field of a row the user kept although it looked like a duplicate (see twin_merge)
-KEPT_BY_USER = "_kept_by_user"
 
 
 def _enrich_existing(session: Session, existing_id: int, ptx, c) -> bool:
@@ -325,9 +323,7 @@ def commit_parsed_import(
             if c.match is not None:
                 # remember which booking this row is, so e.g. a card statement
                 # still finds its purchases when they came from another file first
-                extra = json.loads(raw.extra_fields_json) if raw.extra_fields_json else {}
-                extra["_duplicate_of"] = c.match.id
-                raw.extra_fields_json = json.dumps(extra, ensure_ascii=False)
+                raw.duplicate_of_transaction_id = c.match.id
                 session.add(raw)
             if c.status == "exact_duplicate" and c.match is not None:
                 enriched += int(_enrich_existing(session, c.match.id, ptx, c))
@@ -344,9 +340,7 @@ def commit_parsed_import(
             if decision_map.get(ptx.source_row_index) == "keep":
                 # the user said: a booking of its own, although it looked like one already there —
                 # never merged with it later (twin_merge)
-                extra = json.loads(raw.extra_fields_json) if raw.extra_fields_json else {}
-                extra[KEPT_BY_USER] = True
-                raw.extra_fields_json = json.dumps(extra, ensure_ascii=False)
+                raw.kept_by_user = True
                 session.add(raw)
 
         tx = Transaction(

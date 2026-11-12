@@ -72,6 +72,11 @@ start — back up your data before updating).
   grows with the number of card statements waiting for their payment.
 - Of many files dropped at once, two are uploaded and read at a time; the
   others wait for their turn.
+- Which booking a row stands for that was skipped as a duplicate (the same
+  purchase in a card's statement and in its export) is now a checked
+  reference in the database instead of a note inside the row's extra
+  columns: it can no longer point at a booking that is gone. The database is
+  upgraded on the first start (a copy is kept, see below).
 
 ### Added
 - Before the database schema is upgraded on start-up, a copy of the

@@ -25,7 +25,6 @@ before the row it used to point to is deleted, or the delete fails.
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 
 from sqlmodel import Session, delete, select
@@ -66,22 +65,17 @@ def _rehome_shared_bookings(session: Session, import_id: int, removed: dict[int,
     if not removed:
         return set()
     others: dict[int, list[RawTransaction]] = {}
-    for raw in session.exec(
-        select(RawTransaction).where(
-            RawTransaction.import_id != import_id, RawTransaction.extra_fields_json.like('%"_duplicate_of"%')
-        ).order_by(RawTransaction.import_id, RawTransaction.id)
-    ).all():
-        try:
-            target = json.loads(raw.extra_fields_json).get("_duplicate_of")
-        except (ValueError, AttributeError):
-            continue
-        if target in removed:
-            others.setdefault(target, []).append(raw)
+    for chunk in chunked(list(removed)):
+        for raw in session.exec(
+            select(RawTransaction).where(
+                RawTransaction.import_id != import_id, RawTransaction.duplicate_of_transaction_id.in_(chunk)
+            )
+        ).all():
+            others.setdefault(raw.duplicate_of_transaction_id, []).append(raw)
     for tx_id, raws in others.items():
-        tx, row = removed[tx_id], raws[0]
-        extra = json.loads(row.extra_fields_json)
-        extra.pop("_duplicate_of", None)
-        row.extra_fields_json = json.dumps(extra, ensure_ascii=False) if extra else None
+        # (the earliest of those files; its other rows for this booking go on pointing at it)
+        tx, row = removed[tx_id], min(raws, key=lambda r: (r.import_id, r.id))
+        row.duplicate_of_transaction_id = None
         tx.raw_transaction_id = row.id
         tx.normalized_description = (row.original_description or tx.normalized_description).strip()
         session.add(row)
@@ -113,14 +107,10 @@ def remove_import(session: Session, import_id: int) -> ImportRemovalResult:
     tx_to_remove = [t for t in tx_to_remove if t.id not in kept]
     tx_ids_to_remove = {t.id for t in tx_to_remove}
     # bookings of other files this file's skipped rows stood for (they may have told its place)
-    merged_into = set()
-    for r in raw_transactions:
-        try:
-            target = json.loads(r.extra_fields_json).get("_duplicate_of") if r.extra_fields_json else None
-        except (ValueError, AttributeError):
-            target = None
-        if isinstance(target, int) and target not in tx_ids_to_remove:
-            merged_into.add(target)
+    merged_into = {
+        r.duplicate_of_transaction_id for r in raw_transactions
+        if r.duplicate_of_transaction_id is not None and r.duplicate_of_transaction_id not in tx_ids_to_remove
+    }
 
     # 1. Revert any transfer partner whose OTHER half is being removed —
     # never leave a transfer_pair_id pointing at a soon-to-be-deleted row.
@@ -204,7 +194,15 @@ def remove_import(session: Session, import_id: int) -> ImportRemovalResult:
     forget_points(session, import_id, tx_ids_to_remove)
     session.flush()
 
-    # 6. Delete the transactions themselves.
+    # 6. Delete the transactions themselves — after this file's own rows
+    # stopped pointing at them (two rows of it were the same booking of
+    # another file, removed since: one row took the booking over, the other
+    # still names it).
+    for r in raw_transactions:
+        if r.duplicate_of_transaction_id in tx_ids_to_remove:
+            r.duplicate_of_transaction_id = None
+            session.add(r)
+    session.flush()
     for t in tx_to_remove:
         session.delete(t)
     session.flush()

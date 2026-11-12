@@ -137,3 +137,38 @@ def test_the_standing_follows_each_statements_printed_figures(client, tmp_path):
     [program] = client.get("/api/points").json()
     assert [(m["month"], m["balance"]) for m in program["months"]] == [("2026-03", 1055), ("2026-04", 595)]
     assert program["earned"] == 95 and program["redeemed"] == -500 and program["balance"] == 595
+
+
+def test_points_reach_bookings_that_came_from_the_export_first(client, tmp_path):
+    """The statement's rows are no bookings of their own then (each names the
+    export's booking it is) — its points still belong to those, also when
+    they are read again on start."""
+    from sqlmodel import delete
+
+    from app.config import settings
+    from app.db.models import PointsEntry
+    from app.db.session import session_scope
+    from app.services.points_service import POINTS_MARKER, backfill_points
+
+    card = client.post("/api/accounts", json={"name": "Karte", "account_type": "credit_card"}).json()["id"]
+    export = (b"Datum,Beschreibung,Betrag\n2026-03-03,Buchladen Beispiel,-40.00\n"
+              b"2026-03-06,Buchladen Beispiel,-10.00\n2026-03-10,Kiosk Beispiel,-5.00\n")
+    path = write_text_pdf(tmp_path / "karte.pdf", STATEMENT)
+    for name, content, kind in (("export.csv", export, "text/csv"), ("karte.pdf", path.read_bytes(), "application/pdf")):
+        preview = client.post("/api/imports/preview", data={"account_id": card},
+                              files={"file": (name, io.BytesIO(content), kind)}).json()
+        commit = client.post("/api/imports/commit", json={"staging_id": preview["staging_id"], "account_id": card})
+        assert commit.status_code == 200, commit.text
+    assert commit.json()["transactions_created"] == 0  # all three were there
+
+    def points():
+        return sorted(t["points"] or 0 for t in client.get("/api/transactions").json()["items"])
+
+    assert points() == [5, 10, 40]
+    with session_scope() as session:
+        session.exec(delete(PointsEntry))
+        session.commit()
+        assert points() == [0, 0, 0]
+        (settings.data_dir / POINTS_MARKER).unlink(missing_ok=True)
+        backfill_points(session)
+    assert points() == [5, 10, 40]

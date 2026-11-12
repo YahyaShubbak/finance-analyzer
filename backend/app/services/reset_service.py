@@ -15,10 +15,10 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlmodel import Session, SQLModel, delete, select
+from sqlmodel import Session, SQLModel, delete, select, update
 
 from app.config import settings
-from app.db.models import ImportRecord
+from app.db.models import ImportRecord, RawTransaction
 
 logger = logging.getLogger("finance")
 
@@ -94,6 +94,8 @@ def reset_everything(session: Session, delete_backups: bool = False) -> ResetRes
     stored_paths = {stored_relative_name(path) for path in session.exec(select(ImportRecord.stored_path)).all()}
 
     rows = 0
+    # (the one reference that goes against the tables' order: a skipped row's booking)
+    session.exec(update(RawTransaction).values(duplicate_of_transaction_id=None))
     for table in reversed(SQLModel.metadata.sorted_tables):  # dependents first
         rows += session.exec(delete(table)).rowcount or 0
     session.commit()

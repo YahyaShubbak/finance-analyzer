@@ -45,17 +45,18 @@ def find_twins(session: Session) -> list[tuple[Transaction, Transaction]]:
         file_kind,
         twin_dates_fit,
     )
-    from app.services.import_service import KEPT_BY_USER
     from app.services.transfer_marking import corrected_fields
 
     rows = [
-        (tx, record) for tx, record, raw in session.exec(
-            select(Transaction, ImportRecord, RawTransaction)
+        (tx, record) for tx, record in session.exec(
+            select(Transaction, ImportRecord)
             .join(RawTransaction, RawTransaction.id == Transaction.raw_transaction_id)
             .join(ImportRecord, ImportRecord.id == RawTransaction.import_id)
-            .where(Transaction.is_duplicate == False)  # noqa: E712
+            .where(
+                Transaction.is_duplicate == False,  # noqa: E712
+                RawTransaction.kept_by_user == False,  # noqa: E712 — the user said: a booking of its own
+            )
         ).all()
-        if KEPT_BY_USER not in (raw.extra_fields_json or "")  # the user said: a booking of its own
     ]
     corrected = {tx_id for tx_id, _field in corrected_fields(session)}
     groups: dict[tuple[int, int], dict[str, list]] = defaultdict(lambda: {"pdf": [], "export": []})

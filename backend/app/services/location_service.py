@@ -8,6 +8,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Iterable
 
+from sqlalchemy.orm import aliased
 from sqlmodel import Session, select
 
 from app.db.chunks import chunked
@@ -48,15 +49,19 @@ def refresh_locations(session: Session, transaction_ids: Iterable[int] | None = 
     accounts = {a.id: a for a in session.exec(select(Account)).all()}
 
     # Rows of other files that were recognized as these same bookings and
-    # skipped on import ("_duplicate_of") still tell their place, e.g. the
-    # merchant's town column of a card export matching a PDF statement.
+    # skipped on import (duplicate_of_transaction_id) still tell their place,
+    # e.g. the merchant's town column of a card export matching a PDF statement.
+    skipped = aliased(RawTransaction)
+    located = (
+        select(Transaction.id)
+        .join(RawTransaction, Transaction.raw_transaction_id == RawTransaction.id)
+        .where(RawTransaction.import_id.in_(import_ids))
+    )
     merged: dict[int, list[dict]] = defaultdict(list)
     for raw in session.exec(
-        select(RawTransaction).where(RawTransaction.extra_fields_json.like('%"_duplicate_of"%'))
+        select(skipped).where(skipped.duplicate_of_transaction_id.in_(located)).order_by(skipped.id)
     ).all():
-        extra = _extra(raw)
-        if isinstance(extra.get("_duplicate_of"), int):
-            merged[extra["_duplicate_of"]].append(extra)
+        merged[raw.duplicate_of_transaction_id].append(_extra(raw))
 
     by_import: dict[int, list[tuple[Transaction, RawTransaction]]] = defaultdict(list)
     for tx, raw in rows:
