@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, func, select
 
+from app.api.transaction_listing import SortOrder, TransactionSort, search_filter, sorted_by, transaction_read
 from app.db.models import (
     Account,
     CategoryRule,
@@ -16,9 +16,8 @@ from app.db.models import (
     UserCorrection,
     utcnow,
 )
-from app.db.session import fold_plain, fold_text, get_session
+from app.db.session import get_session
 from app.i18n import tr
-from app.normalization.review import review_reason_text
 from app.reconciliation.engine import reconcile_statement
 from app.schemas.transaction import (
     AssignCategoryRequest,
@@ -44,8 +43,7 @@ from app.services.rule_service import (
     learn_category,
     reapply_rules,
 )
-from app.services.transfer_detection_service import unpair_transfer
-from app.services.transfer_marking import corrected_fields, release_from_transfer, settle_as_transfer
+from app.services.transfer_marking import corrected_fields, release_from_transfer, settle_as_transfer, unpair_transfer
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
@@ -57,69 +55,6 @@ def _category_rule_read(rule: CategoryRule | None) -> CategoryRuleRead | None:
         id=rule.id, pattern=rule.pattern, is_regex=rule.is_regex, match_field=rule.match_field,
         category=rule.category, priority=rule.priority, is_user_defined=rule.is_user_defined,
     )
-
-
-def _to_read(t: Transaction, account_name: str) -> TransactionRead:
-    source_filename = None
-    if t.raw_transaction and t.raw_transaction.import_record:
-        source_filename = t.raw_transaction.import_record.filename
-    return TransactionRead(
-        id=t.id,
-        account_id=t.account_id,
-        account_name=account_name,
-        transaction_date=t.transaction_date,
-        normalized_description=t.normalized_description,
-        merchant=t.merchant,
-        category=t.category,
-        amount_minor=t.amount_minor,
-        currency=t.currency,
-        transaction_type=t.transaction_type,
-        is_duplicate=t.is_duplicate,
-        is_transfer=t.is_transfer,
-        needs_review=t.needs_review,
-        review_reason=review_reason_text(t.review_reason),
-        notes=t.notes,
-        source_filename=source_filename,
-        country=t.country,
-        city=t.city,
-        online=t.online,
-    )
-
-
-TransactionSort = Literal["date", "amount", "account", "type"]
-SortOrder = Literal["asc", "desc"]
-
-
-def search_filter(search: str):
-    """Description or merchant contains `search`. Umlauts and case don't
-    matter ("BÄCKEREI" finds "Baeckerei", "Muller" finds "Müller"); LIKE
-    wildcards are escaped so "50%" or "_" are searched literally."""
-    def pattern(text: str) -> str:
-        escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        return f"%{escaped}%"
-
-    like, plain = pattern(fold_text(search)), pattern(fold_plain(search))
-    return (
-        func.fold(Transaction.normalized_description).like(like, escape="\\")
-        | func.fold(Transaction.merchant).like(like, escape="\\")
-        | func.fold_plain(Transaction.normalized_description).like(plain, escape="\\")
-        | func.fold_plain(Transaction.merchant).like(plain, escape="\\")
-    )
-
-
-def sorted_by(stmt, sort: TransactionSort, order: SortOrder):
-    """The chosen column (an amount: signed, so the biggest expense is the
-    smallest), then newest first — a stable order across pages."""
-    column = {
-        "date": Transaction.transaction_date,
-        "amount": Transaction.amount_minor,
-        "account": func.lower(Account.name),
-        "type": Transaction.transaction_type,
-    }[sort]
-    if sort == "account":
-        stmt = stmt.join(Account, Account.id == Transaction.account_id)
-    return stmt.order_by(column.asc() if order == "asc" else column.desc(),
-                         Transaction.transaction_date.desc(), Transaction.id.desc())
 
 
 @router.get("", response_model=TransactionListResponse)
@@ -181,7 +116,7 @@ def list_transactions(
 
     accounts_by_id = {a.id: a.name for a in session.exec(select(Account)).all()}
 
-    items = [_to_read(t, accounts_by_id.get(t.account_id, "Unknown")) for t in page_items]
+    items = [transaction_read(t, accounts_by_id.get(t.account_id, "Unknown")) for t in page_items]
     points = points_by_transaction(session, [t.id for t in page_items])
     for item in items:
         item.points = points.get(item.id)
@@ -211,7 +146,7 @@ def review_groups(
     points = points_by_transaction(session, [t.id for t in members])
     groups = []
     for group in result.groups:
-        items = [_to_read(t, accounts_by_id.get(t.account_id, "Unknown")) for t in group.transactions[:MAX_GROUP_DETAILS]]
+        items = [transaction_read(t, accounts_by_id.get(t.account_id, "Unknown")) for t in group.transactions[:MAX_GROUP_DETAILS]]
         for item in items:
             item.points = points.get(item.id)
         groups.append(ReviewGroupRead(
@@ -297,7 +232,7 @@ def update_transaction(
     session.refresh(tx)
 
     account = session.get(Account, tx.account_id)
-    return _to_read(tx, account.name if account else "Unknown")
+    return transaction_read(tx, account.name if account else "Unknown")
 
 
 @router.post("/reapply-rules", response_model=ReapplyRulesResponse)
@@ -327,7 +262,7 @@ def create_merchant_rule(
 
     account = session.get(Account, tx.account_id)
     return CreateRuleResponse(
-        transaction=_to_read(tx, account.name if account else "Unknown"),
+        transaction=transaction_read(tx, account.name if account else "Unknown"),
         merchant_rule=MerchantRuleRead(
             id=rule.id, pattern=rule.pattern, is_regex=rule.is_regex,
             normalized_merchant=rule.normalized_merchant, is_user_defined=rule.is_user_defined,
@@ -351,7 +286,7 @@ def create_category_rule(
     tx, rule = lesson.transaction, lesson.rule
     account = session.get(Account, tx.account_id)
     return CreateRuleResponse(
-        transaction=_to_read(tx, account.name if account else "Unknown"),
+        transaction=transaction_read(tx, account.name if account else "Unknown"),
         category_rule=_category_rule_read(rule),
         applied_to=lesson.applied_to,
     )

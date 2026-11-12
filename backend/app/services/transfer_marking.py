@@ -15,7 +15,12 @@ from sqlmodel import Session, or_, select
 
 from app.db.chunks import chunked
 from app.db.models import Account, AccountType, RawTransaction, Transaction, TransactionType, UserCorrection
-from app.normalization.category import UNSORTED_CATEGORIES
+from app.normalization.category import CARD_ACCOUNT_EXCLUDED, UNSORTED_CATEGORIES, categorize
+from app.normalization.review import REFUND_FROM_SOMEONE_ELSE, compute_review_status
+from app.services.account_recognition import own_ibans_by_account
+from app.services.chains import chain_index, payee_name
+from app.services.duplicate_preview_service import is_card_payment, load_rules, paid_by_someone_else
+from app.services.rule_patterns import raw_extra
 
 logger = logging.getLogger("finance")
 
@@ -31,6 +36,16 @@ def corrected_fields(session: Session, tx_ids: list[int] | None = None) -> set[t
     return {row for chunk in chunked(tx_ids) for row in session.exec(stmt.where(UserCorrection.transaction_id.in_(chunk))).all()}
 
 
+def natural_type(amount_minor: int) -> TransactionType:
+    return TransactionType.INCOME if amount_minor > 0 else TransactionType.EXPENSE
+
+
+def manually_corrected_type_ids(session: Session) -> set[int]:
+    return set(
+        session.exec(select(UserCorrection.transaction_id).where(UserCorrection.field == "transaction_type")).all()
+    )
+
+
 def settle_as_transfer(tx: Transaction, corrected: set[tuple[int, str]]) -> None:
     if (tx.id, "category") not in corrected and tx.category in _UNSORTED:
         tx.category = TRANSFERS
@@ -40,11 +55,6 @@ def settle_as_transfer(tx: Transaction, corrected: set[tuple[int, str]]) -> None
 def release_from_transfer(session: Session, tx: Transaction, corrected: set[tuple[int, str]],
                           category_rules: list | None = None) -> None:
     """`tx` is an ordinary transaction again (type already reset)."""
-    from app.normalization.category import CARD_ACCOUNT_EXCLUDED, categorize
-    from app.normalization.review import compute_review_status
-    from app.services.duplicate_preview_service import load_rules
-    from app.services.rule_service import raw_extra
-
     if (tx.id, "category") not in corrected and tx.category == TRANSFERS:
         raw = session.get(RawTransaction, tx.raw_transaction_id)
         account = session.get(Account, tx.account_id)
@@ -60,6 +70,26 @@ def release_from_transfer(session: Session, tx: Transaction, corrected: set[tupl
         tx.needs_review, tx.review_reason = compute_review_status(tx.merchant, tx.category)
 
 
+def unpair_transfer(session: Session, tx: Transaction) -> None:
+    """Revert the partner of an auto-detected transfer pair when one half
+    is corrected manually or deleted, so no half-transfer is left behind.
+    The partner itself is not manually corrected, so a later re-scan may
+    pair it again with a better match."""
+    if tx.transfer_pair_id is None:
+        return
+    partner = session.get(Transaction, tx.transfer_pair_id)
+    tx.transfer_pair_id = None
+    if partner is not None and partner.transfer_pair_id == tx.id:
+        partner.transfer_pair_id = None
+        account = session.get(Account, partner.account_id)
+        if not (account and account.account_type == AccountType.CREDIT_CARD and partner.amount_minor > 0):
+            # (a payment onto a card stays a transfer, just unpaired)
+            partner.is_transfer = False
+            partner.transaction_type = natural_type(partner.amount_minor)
+            release_from_transfer(session, partner, corrected_fields(session, [partner.id]))
+        session.add(partner)
+
+
 def settle_flagged_transfers(session: Session) -> None:
     """On start-up: transfers recognized by older versions still asked for a
     category review, and card bills that are no transfer were filed under
@@ -70,8 +100,6 @@ def settle_flagged_transfers(session: Session) -> None:
             select(Transaction).where(Transaction.is_transfer == False, Transaction.category == TRANSFERS)  # noqa: E712
         ).all()
         if misfiled:
-            from app.services.duplicate_preview_service import load_rules
-
             corrected = corrected_fields(session, [t.id for t in misfiled])
             _merchant_rules, category_rules = load_rules(session)
             for tx in misfiled:
@@ -94,36 +122,12 @@ def settle_flagged_transfers(session: Session) -> None:
         logger.exception("Could not clear the category review of transfers")
 
 
-def link_card_bills(session: Session) -> None:
-    """On start-up: link card bills that older versions left as expenses —
-    a statement's payment line paying the previous bill, a card export that
-    is one billing period. A failure here must never keep the app from starting."""
-    try:
-        from app.reconciliation.engine import derive_statements_from_exports, link_pending_payments
-        from app.services.transfer_detection_service import detect_and_mark_transfers
-
-        retype_card_payments(session)
-        derive_statements_from_exports(session)
-        link_pending_payments(session)
-        detect_and_mark_transfers(session)
-        sort_card_bill_payees(session)
-    except Exception:  # noqa: BLE001 — logged; the bills just stay unlinked
-        session.rollback()
-        logger.exception("Could not link card bills")
-
-
 def retype_card_payments(session: Session) -> int:
     """Money in on a card that pays the card off, read as a refund by an
     older version (e.g. a bare "Payment" line): a transfer, so transfer
     detection can pair it with the bank's debit. And the other way round:
     money from someone else's account, read as a card payment, is a refund
     for the user to sort. A type the user set stays."""
-    from app.normalization.review import REFUND_FROM_SOMEONE_ELSE
-    from app.services.account_recognition import own_ibans_by_account
-    from app.services.duplicate_preview_service import is_card_payment, paid_by_someone_else
-    from app.services.rule_service import raw_extra
-    from app.services.transfer_detection_service import manually_corrected_type_ids
-
     cards = {a.id: a for a in session.exec(select(Account).where(Account.account_type == AccountType.CREDIT_CARD)).all()}
     if not cards:
         return 0
@@ -164,9 +168,6 @@ def sort_card_bill_payees(session: Session) -> int:
     isn't imported ("LANDESBANK BERLIN ... RECHNUNG VOM ..."), where they
     can't be linked. Only unsorted bookings are changed, never ones sorted
     by hand. Returns how many were sorted."""
-    from app.normalization.review import compute_review_status
-    from app.services.chains import chain_index, payee_name
-
     chains = chain_index(session)
 
     def payee(tx: Transaction) -> str | None:

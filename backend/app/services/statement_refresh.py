@@ -13,8 +13,12 @@ import logging
 
 from sqlmodel import Session, select
 
+from app.config import settings
 from app.db.models import CreditCardStatement, DocumentType, ImportRecord, Reconciliation
 from app.importers.base import ParseOptions
+from app.reconciliation.engine import current_bank_payment, link_pending_payments, reconcile_statement, release_payment
+from app.services.import_reading import parse_file
+from app.services.import_staging import stored_import_path
 
 logger = logging.getLogger("finance")
 
@@ -26,11 +30,6 @@ STATEMENTS_MARKER = ".statements_version"
 
 def refresh_statement_totals(session: Session, force: bool = False) -> int:
     """Returns how many statements were corrected. Never keeps the app from starting."""
-    from app.config import settings
-    from app.reconciliation.engine import current_bank_payment, reconcile_statement, release_payment
-    from app.services.import_service import parse_file
-    from app.services.import_staging import stored_import_path
-
     marker = settings.data_dir / STATEMENTS_MARKER
     try:
         if not force and marker.exists() and marker.read_text(encoding="utf-8").strip() == STATEMENTS_VERSION:
@@ -63,8 +62,6 @@ def refresh_statement_totals(session: Session, force: bool = False) -> int:
             reconcile_statement(session, statement.id, auto_match=True)
             corrected += 1
         session.commit()
-        from app.reconciliation.engine import link_pending_payments
-
         linked = link_pending_payments(session)
         marker.write_text(STATEMENTS_VERSION, encoding="utf-8")
         if corrected or linked:

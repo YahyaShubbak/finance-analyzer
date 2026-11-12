@@ -27,6 +27,7 @@ from sqlalchemy import case
 from sqlmodel import Session, func, select
 
 from app.db.models import Account, Transaction
+from app.schemas.account import AccountRead
 
 
 @dataclass
@@ -66,3 +67,22 @@ def compute_account_summaries(session: Session) -> dict[int, AccountSummary]:
         )
         for account_id, opening, count, total, since_opening in rows
     }
+
+
+def account_read(account: Account, summaries: dict[int, AccountSummary]) -> AccountRead:
+    """The account as the API shows it (the one place that builds it)."""
+    summary = summaries.get(account.id, AccountSummary(0, 0, account.opening_balance_minor or 0))
+    return AccountRead(
+        id=account.id,
+        name=account.name,
+        account_type=account.account_type,
+        currency=account.currency,
+        iban=account.iban,
+        created_at=account.created_at,
+        is_archived=account.is_archived,
+        transaction_count=summary.transaction_count,
+        transactions_balance_minor=summary.transactions_balance_minor,
+        opening_balance_minor=account.opening_balance_minor,
+        opening_balance_date=account.opening_balance_date,
+        current_balance_minor=summary.current_balance_minor,
+    )

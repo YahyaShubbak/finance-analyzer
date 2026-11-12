@@ -13,7 +13,8 @@ from sqlmodel import select
 
 from app.reconciliation.engine import reconcile_statement
 from app.services.analytics_service import compute_totals
-from app.services.import_service import commit_parsed_import, parse_file
+from app.services.import_reading import parse_file
+from app.services.import_service import commit_parsed_import
 from tests.pdf_fixtures import write_text_pdf
 
 

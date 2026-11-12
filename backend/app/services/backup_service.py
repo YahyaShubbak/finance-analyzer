@@ -52,7 +52,18 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 from app.config import settings
+from app.db import session as db_session
+from app.db.migrate import known_revisions, upgrade_database
 from app.i18n import tr
+from app.services.account_recognition import refresh_signatures
+from app.services.card_bill_linking import link_card_bills
+from app.services.import_staging import is_app_document, stored_relative_name
+from app.services.location_service import refresh_outdated_locations
+from app.services.points_service import backfill_points
+from app.services.rule_service import RULES_MARKER, apply_rule_updates
+from app.services.statement_refresh import refresh_statement_totals
+from app.services.transfer_marking import settle_flagged_transfers
+from app.services.twin_merge import merge_cross_file_twins
 
 _REQUIRED_TABLES = {
     "accounts", "imports", "raw_transactions", "transactions", "user_corrections",
@@ -288,8 +299,6 @@ def validate_backup_zip(zip_path: Path) -> dict:
 
 
 def _validate_database_file(db_path: Path) -> None:
-    from app.db.migrate import known_revisions
-
     try:
         conn = sqlite3.connect(str(db_path))
         try:
@@ -327,8 +336,6 @@ def _validate_database_file(db_path: Path) -> None:
 def _stage_restore(zip_path: Path, staging_root: Path) -> tuple[Path, Path]:
     """Extract and migrate the backup inside `staging_root`. Returns the
     staged (database, imports directory)."""
-    from app.db.migrate import upgrade_database
-
     staged_db = staging_root / "finance.db"
     staged_imports = staging_root / "imports"
     staged_imports.mkdir(parents=True)
@@ -437,8 +444,6 @@ def _stored_document_names(database_path: Path) -> set[str]:
     """The stored originals of the imports in this database, as names
     inside the imports folder. Empty when it can't be read (then only files
     named the way the app names them count as the app's)."""
-    from app.services.import_staging import stored_relative_name
-
     if not database_path.exists():
         return set()
     try:
@@ -458,8 +463,6 @@ def _keep_other_files(replaced: Path, imports: Path, app_documents: set[str]) ->
     not an import's stored original is moved back, so only the app's own
     documents go. Returns False if a file could not be moved — it then
     stays in `replaced`."""
-    from app.services.import_staging import is_app_document
-
     if not replaced.is_dir():
         return True
     complete = True
@@ -488,8 +491,6 @@ def restore_from_backup(zip_path: Path, confirm: bool) -> RestoreResult:
     """
     if not confirm:
         raise BackupError(tr("Restore requires explicit confirmation."))
-
-    from app.db import session as db_session
 
     with db_session.maintenance_lock:
         manifest = validate_backup_zip(zip_path)  # raises before anything is touched
@@ -532,27 +533,16 @@ def restore_from_backup(zip_path: Path, confirm: bool) -> RestoreResult:
                 shutil.rmtree(staging_root, ignore_errors=True)
 
         # an older backup lacks what newer versions work out on start-up
-        from app.services.location_service import refresh_outdated_locations
-        from app.services.points_service import backfill_points
-        from app.services.transfer_marking import link_card_bills, settle_flagged_transfers
         with db_session.session_scope() as session:
             refresh_outdated_locations(session)
             settle_flagged_transfers(session)
             link_card_bills(session)
             backfill_points(session, force=True)
-            from app.services.statement_refresh import refresh_statement_totals
-
             refresh_statement_totals(session, force=True)
-            from app.services.account_recognition import refresh_signatures
-
             refresh_signatures(session, force=True)
             # the restored bookings may predate the current built-in rules
-            from app.services.rule_service import RULES_MARKER, apply_rule_updates
-
             (settings.data_dir / RULES_MARKER).unlink(missing_ok=True)
             apply_rule_updates(session)
-            from app.services.twin_merge import merge_cross_file_twins
-
             merge_cross_file_twins(session, force=True)
 
     return RestoreResult(

@@ -7,13 +7,7 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import Session, func, select
 
 from app.api.params import parse_account_ids
-from app.api.routes.transactions import (  # the single TransactionRead-building logic, search and order
-    SortOrder,
-    TransactionSort,
-    _to_read,
-    search_filter,
-    sorted_by,
-)
+from app.api.transaction_listing import SortOrder, TransactionSort, search_filter, sorted_by, transaction_read
 from app.db.models import Account, RawTransaction, Transaction
 from app.db.session import get_session
 from app.schemas.analytics import (
@@ -100,7 +94,7 @@ def _transactions_page(session: Session, query, page: int, page_size: int, searc
     ).all()
     account_names = {a.id: a.name for a in session.exec(select(Account)).all()}
     return CategoryTransactionsResponse(
-        items=[_to_read(t, account_names.get(t.account_id, "Unknown")) for t in page_items],
+        items=[transaction_read(t, account_names.get(t.account_id, "Unknown")) for t in page_items],
         total=total,
         page=page,
         page_size=page_size,

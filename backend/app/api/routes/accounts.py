@@ -8,7 +8,7 @@ from app.db.models import Account
 from app.db.session import get_session
 from app.i18n import tr
 from app.schemas.account import AccountCreate, AccountRead, AccountUpdate
-from app.services.account_service import AccountSummary, compute_account_summaries
+from app.services.account_service import account_read, compute_account_summaries
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
@@ -19,24 +19,6 @@ router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 _CLEARABLE_FIELDS = {"opening_balance_minor", "opening_balance_date", "iban"}
 
 
-def _to_read(account: Account, summaries: dict[int, AccountSummary]) -> AccountRead:
-    summary = summaries.get(account.id, AccountSummary(0, 0, account.opening_balance_minor or 0))
-    return AccountRead(
-        id=account.id,
-        name=account.name,
-        account_type=account.account_type,
-        currency=account.currency,
-        iban=account.iban,
-        created_at=account.created_at,
-        is_archived=account.is_archived,
-        transaction_count=summary.transaction_count,
-        transactions_balance_minor=summary.transactions_balance_minor,
-        opening_balance_minor=account.opening_balance_minor,
-        opening_balance_date=account.opening_balance_date,
-        current_balance_minor=summary.current_balance_minor,
-    )
-
-
 @router.get("", response_model=list[AccountRead])
 def list_accounts(include_archived: bool = False, session: Session = Depends(get_session)):
     stmt = select(Account)
@@ -44,7 +26,7 @@ def list_accounts(include_archived: bool = False, session: Session = Depends(get
         stmt = stmt.where(Account.is_archived == False)  # noqa: E712
     accounts = session.exec(stmt).all()
     summaries = compute_account_summaries(session)
-    return [_to_read(a, summaries) for a in accounts]
+    return [account_read(a, summaries) for a in accounts]
 
 
 def _reject_iban_in_use(session: Session, iban: str | None, account_id: int | None = None) -> None:
@@ -70,7 +52,7 @@ def create_account(payload: AccountCreate, session: Session = Depends(get_sessio
         session.rollback()
         raise HTTPException(status_code=409, detail=tr("An account named '{name}' already exists.", name=payload.name)) from None
     session.refresh(account)
-    return _to_read(account, {})
+    return account_read(account, {})
 
 
 @router.patch("/{account_id}", response_model=AccountRead)
@@ -93,4 +75,4 @@ def update_account(account_id: int, payload: AccountUpdate, session: Session = D
     session.refresh(account)
 
     summaries = compute_account_summaries(session)
-    return _to_read(account, summaries)
+    return account_read(account, summaries)

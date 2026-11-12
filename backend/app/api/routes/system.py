@@ -10,7 +10,8 @@ from pydantic import BaseModel
 from sqlmodel import Session
 
 from app.config import APP_VERSION, settings
-from app.db.session import get_session
+from app.db.session import get_session, maintenance_lock
+from app.services.reset_service import reset_everything
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -65,9 +66,6 @@ def reset(payload: ResetRequest, session: Session = Depends(get_session)):
     """Delete all data: bookings, imports with their originals, accounts,
     own categories and rules, budgets, points, exports — and the backups
     only when asked."""
-    from app.db.session import maintenance_lock
-    from app.services.reset_service import reset_everything
-
     with maintenance_lock:  # not while an import, removal or restore is writing
         result = reset_everything(session, delete_backups=payload.delete_backups)
     return ResetResponse(rows_deleted=result.rows_deleted, files_deleted=result.files_deleted)

@@ -25,8 +25,18 @@ from app.api.routes import (
 )
 from app.config import APP_VERSION, REPO_ROOT, default_data_dir, settings
 from app.db.session import init_db, session_scope
-from app.i18n import LanguageMiddleware
+from app.i18n import LanguageMiddleware, tr
 from app.security import LocalRequestGuard
+from app.services.account_recognition import refresh_signatures
+from app.services.backup_service import purge_leftover_restore_dirs
+from app.services.card_bill_linking import link_card_bills
+from app.services.import_staging import purge_stale_staging_files
+from app.services.location_service import refresh_outdated_locations
+from app.services.points_service import backfill_points
+from app.services.rule_service import apply_rule_updates
+from app.services.statement_refresh import refresh_statement_totals
+from app.services.transfer_marking import settle_flagged_transfers
+from app.services.twin_merge import merge_cross_file_twins
 
 logger = logging.getLogger("finance")
 
@@ -41,17 +51,8 @@ async def lifespan(_app: FastAPI):
             "Re-run the install script to move it to %s.",
             settings.data_dir, default_data_dir(),
         )
-    from app.services.backup_service import purge_leftover_restore_dirs
-    from app.services.import_staging import purge_stale_staging_files
     purge_stale_staging_files()
     purge_leftover_restore_dirs()
-    from app.services.account_recognition import refresh_signatures
-    from app.services.location_service import refresh_outdated_locations
-    from app.services.points_service import backfill_points
-    from app.services.rule_service import apply_rule_updates
-    from app.services.statement_refresh import refresh_statement_totals
-    from app.services.transfer_marking import link_card_bills, settle_flagged_transfers
-    from app.services.twin_merge import merge_cross_file_twins
     with session_scope() as session:
         refresh_outdated_locations(session)
         settle_flagged_transfers(session)
@@ -71,8 +72,6 @@ app = FastAPI(title="Local Finance Analyzer", version=APP_VERSION, lifespan=life
 async def _number_too_large(_request, _exc: OverflowError):
     # e.g. an id or amount beyond SQLite's 64-bit integers in a request
     from fastapi.responses import JSONResponse
-
-    from app.i18n import tr
 
     return JSONResponse(status_code=422, content={"detail": tr("A number in the request is too large.")})
 

@@ -2,7 +2,7 @@
 
 Card statements name the shop with its branch: "MERCADONA C/JACA VALENCIA",
 "MERCADONA AV.DE FRANCIA VALENCIA", "ROSSMANN KASSEL". Each text is a payee
-of its own to rule_service.derive_category_pattern, so a learned category
+of its own to rule_patterns.derive_category_pattern, so a learned category
 covered one branch only and the review queue asked once per branch.
 
 Found from the user's own bookings, without a list of names: each payee
@@ -20,6 +20,9 @@ import re
 from sqlmodel import Session, select
 
 from app.db.models import Transaction
+from app.db.session import remembered
+from app.normalization.location import NOT_A_TOWN, place_key, places
+from app.services.rule_patterns import category_rule_source, derive_category_pattern
 
 # words that name a kind of place, not a payee: never a chain on their own
 _GENERIC = frozenset("""
@@ -43,12 +46,10 @@ _BRANCH_RE = re.compile(
 
 
 def _is_town(word: str) -> bool:
-    from app.normalization.location import _NOT_A_TOWN, _places, place_key
-
     # "MAINZ-KOSTHEIM", "LEIPZIG/CONNEWI": the town comes first; very short
     # words are a town somewhere far too often
     key = place_key(re.split(r"[-/]", word)[0])
-    return len(key) >= 4 and key not in _NOT_A_TOWN and key in _places()
+    return len(key) >= 4 and key not in NOT_A_TOWN and key in places()
 
 
 def _branch_word(word: str) -> bool:
@@ -113,15 +114,11 @@ def chain_index(session: Session) -> dict[str, str]:
     """For every payee in the user's bookings: its chain, where it has one.
     Read from every booking, so remembered until the data changes (the
     review queue asks for it with every page, learning with every click)."""
-    from app.db.session import remembered
-
     # (it reads the bookings' merchant and description only)
     return remembered(session, "chain_index", lambda: _chain_index(session), payees_only=True)
 
 
 def _chain_index(session: Session) -> dict[str, str]:
-    from app.services.rule_service import derive_category_pattern
-
     patterns = set()
     for merchant, description in session.exec(
         select(Transaction.merchant, Transaction.normalized_description).distinct()
@@ -137,8 +134,6 @@ def payee_name(tx: Transaction, chains: dict[str, str]) -> str | None:
     ("MERCADONA"), else its own name ("Kiosk Sonnenschein"); None when the
     text names no payee (a bare "PayPal" line). The one definition used for
     review groups, learned rules and card issuers."""
-    from app.services.rule_service import category_rule_source, derive_category_pattern
-
     _field, source = category_rule_source(tx)
     pattern = derive_category_pattern(source)
     return chains.get(pattern.upper(), pattern) if pattern else None

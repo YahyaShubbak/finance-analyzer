@@ -39,9 +39,18 @@ from app.db.models import (
     UserCorrection,
 )
 from app.i18n import tr
-from app.reconciliation.engine import reconcile_statement, release_payment
+from app.normalization.transfers import IBAN_MATCH_MAX_DAY_GAP
+from app.reconciliation.engine import (
+    SUGGESTION_MAX_DAY_GAP,
+    link_pending_payments,
+    reconcile_statement,
+    release_payment,
+)
 from app.services.import_staging import stored_import_path
-from app.services.transfer_detection_service import unpair_transfer
+from app.services.location_service import refresh_locations
+from app.services.points_service import forget_points
+from app.services.transfer_detection_service import detect_and_mark_transfers
+from app.services.transfer_marking import unpair_transfer
 
 
 class ImportRemovalError(Exception):
@@ -189,8 +198,6 @@ def remove_import(session: Session, import_id: int) -> ImportRemovalResult:
 
     # 5b. Points: this file's go with it; other files' points keep their
     # number but lose the booking that is being removed.
-    from app.services.points_service import forget_points
-
     forget_points(session, import_id, tx_ids_to_remove)
     session.flush()
 
@@ -217,7 +224,6 @@ def remove_import(session: Session, import_id: int) -> ImportRemovalResult:
     session.delete(import_record)
     session.commit()
     if merged_into:
-        from app.services.location_service import refresh_locations
         refresh_locations(session, merged_into)
 
     # The original document is gone from the database, so it must not
@@ -241,10 +247,6 @@ def remove_import(session: Session, import_id: int) -> ImportRemovalResult:
     # settle another statement or pair with another booking instead.
     if (transfer_partners_reverted or statements_from_this_import) and period[0] and period[1]:
         from datetime import timedelta
-
-        from app.normalization.transfers import IBAN_MATCH_MAX_DAY_GAP
-        from app.reconciliation.engine import SUGGESTION_MAX_DAY_GAP, link_pending_payments
-        from app.services.transfer_detection_service import detect_and_mark_transfers
 
         # any statement may take a freed debit — also one weeks after this file's dates
         link_pending_payments(session)

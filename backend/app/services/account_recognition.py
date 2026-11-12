@@ -30,14 +30,16 @@ from pathlib import Path
 
 from sqlmodel import Session, select
 
+from app.config import settings
 from app.db.models import Account, AccountType, DocumentType, ImportRecord, ImportStatus
+from app.iban import IBAN_RE, valid_iban
 from app.importers.base import ParsedImport, ParseOptions
 from app.importers.csv_importer import CSVImporter
+from app.services.import_reading import document_account_warning, parse_file, purchases_listed_as_positive
+from app.services.import_staging import stored_import_path
 
 logger = logging.getLogger("finance")
 
-# from Norway's 15 characters to 34 (the check digits tell an IBAN from other codes)
-_IBAN_RE = re.compile(r"\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?\b")
 # A card number with most digits masked: "xxxx xxxxxx x1234", "**** **** **** 1234", "4111 XXXX XXXX 1234".
 _CARD_RE = re.compile(r"(?<![\w*•])[\dXx*•]+(?:[ -][\dXx*•]+){0,4}(?![\w*•])")
 _MASK = "Xx*•"
@@ -61,20 +63,12 @@ class Recognition:
     verified: bool = False  # the user checked this kind of file and said "don't ask again"
 
 
-def _valid_iban(text: str) -> str | None:
-    iban = re.sub(r"\s+", "", text).upper()
-    if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{10,30}", iban):
-        return None
-    digits = "".join(str(int(ch, 36)) for ch in iban[4:] + iban[:4])
-    return iban if int(digits) % 97 == 1 else None
-
-
 # "VISA ending 1234", "Karte endet auf 1234", "Kartennummer endend mit 1234"
 _CARD_ENDING_RE = re.compile(r"(?i)\b(?:ending(?: in)?|endet auf|endend (?:auf|mit)|endziffern?)\s*[:#]?\s*(\d{4})\b")
 
 
 def _identifiers(text: str) -> set[str]:
-    found = {f"iban:{iban}" for m in _IBAN_RE.finditer(text) if (iban := _valid_iban(m.group(0)))}
+    found = {f"iban:{iban}" for m in IBAN_RE.finditer(text) if (iban := valid_iban(m.group(0)))}
     found |= {f"card:{m.group(1)}" for m in _CARD_ENDING_RE.finditer(text)}
     for m in _CARD_RE.finditer(text):
         number = re.sub(r"[ -]", "", m.group(0))
@@ -308,16 +302,11 @@ STATEMENT_ON_CARD_ACCOUNT = "statement_on_card_account"
 def confirmed_warning_codes(parsed: ParsedImport, account: Account) -> list[str]:
     """Warnings that, once accepted for a kind of file on an account, need
     no confirmation again (unlike a balance that doesn't add up)."""
-    from app.services.import_service import document_account_warning
-
     return [STATEMENT_ON_CARD_ACCOUNT] if document_account_warning(parsed, account) else []
 
 
 def ensure_signatures(session: Session) -> None:
     """Imports made before signatures existed: read their stored files once."""
-    from app.services.import_service import parse_file, purchases_listed_as_positive
-    from app.services.import_staging import stored_import_path
-
     records = session.exec(
         select(ImportRecord).where(ImportRecord.source_key == None, ImportRecord.status == ImportStatus.IMPORTED)  # noqa: E711
     ).all()
@@ -347,10 +336,6 @@ def refresh_signatures(session: Session, force: bool = False) -> int:
     """On start-up, once per SIGNATURES_VERSION (force: after a restore): sign
     the imported files again — what was learned about them (options,
     accepted warnings, "don't ask again") stays. Never keeps the app from starting."""
-    from app.config import settings
-    from app.services.import_service import parse_file
-    from app.services.import_staging import stored_import_path
-
     marker = settings.data_dir / SIGNATURES_MARKER
     try:
         if not force and marker.exists() and marker.read_text(encoding="utf-8").strip() == SIGNATURES_VERSION:

@@ -88,13 +88,13 @@ MAX_TABLE_CELLS = 3_000_000
 
 
 def too_large(filename: str, checksum: str) -> ParsedImport:
-    return _error_result(filename, checksum, tr(
+    return error_result(filename, checksum, tr(
         "The file is too large to be a statement (more than {rows} rows or {cells} cells). "
         "Please export a shorter period.", rows=f"{MAX_TABLE_ROWS:,}".replace(",", "."),
         cells=f"{MAX_TABLE_CELLS:,}".replace(",", ".")))
 
 
-def _error_result(filename: str, checksum: str, message: str, **kwargs) -> ParsedImport:
+def error_result(filename: str, checksum: str, message: str, **kwargs) -> ParsedImport:
     return ParsedImport(
         filename=filename, file_checksum=checksum, document_type=DocumentType.BANK_STATEMENT,
         detected_columns={}, transactions=[], issues=[ImportIssue(severity="error", message=message)],
@@ -120,7 +120,7 @@ _MAX_SOURCE_ROWS = 2000
 def parse_rows(rows: list[list[Any]], *, filename: str, checksum: str, options: ParseOptions) -> ParsedImport:
     rows = [list(r) if r is not None else [] for r in rows]
     if not any(cell_text(c) for row in rows for c in row):
-        return _error_result(filename, checksum, tr("File is empty."))
+        return error_result(filename, checksum, tr("File is empty."))
 
     issues: list[ImportIssue] = []
 
@@ -131,7 +131,7 @@ def parse_rows(rows: list[list[Any]], *, filename: str, checksum: str, options: 
     if header_index is None:
         header_index = next(i for i, row in enumerate(rows) if any(cell_text(c) for c in row))
     if not 0 <= header_index < len(rows):
-        return _error_result(filename, checksum,
+        return error_result(filename, checksum,
                              tr("Header row {number} does not exist in this file.", number=header_index + 1))
 
     headers = _unique_headers(rows[header_index])
@@ -143,7 +143,7 @@ def parse_rows(rows: list[list[Any]], *, filename: str, checksum: str, options: 
                 continue
             chosen = options.column_mapping[logical_field] or None
             if chosen is not None and chosen not in headers:
-                return _error_result(filename, checksum, tr("Column {column!r} does not exist in this file.", column=chosen),
+                return error_result(filename, checksum, tr("Column {column!r} does not exist in this file.", column=chosen),
                                      available_columns=headers, header_row_index=header_index)
             mapping[logical_field] = chosen
     if mapping_is_ambiguous(mapping):
@@ -178,7 +178,7 @@ def parse_rows(rows: list[list[Any]], *, filename: str, checksum: str, options: 
     # --- file-level date format --------------------------------------------
     date_format = options.date_format or (bank_format.date_format if bank_format else None)
     if date_format is not None and date_format not in DATE_FORMATS:
-        return _error_result(filename, checksum, tr("Unsupported date format {format!r}.", format=date_format))
+        return error_result(filename, checksum, tr("Unsupported date format {format!r}.", format=date_format))
     date_candidates: list[str] = []
     text_dates = [c for _, r in data_rows if isinstance(c := cell(r, "date"), str) and c.strip()]
     date_ambiguous = False

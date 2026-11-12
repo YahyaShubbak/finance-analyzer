@@ -15,8 +15,19 @@ from collections import defaultdict
 
 from sqlmodel import Session, select
 
+from app.config import settings
 from app.db.models import CreditCardStatement, ImportRecord, PointsEntry, RawTransaction, Transaction
 from app.normalization.category import UNSORTED_CATEGORIES
+from app.reconciliation.engine import reconcile_statement
+from app.services.duplicate_preview_service import (
+    CROSS_FILE_DATE_WINDOW_DAYS,
+    SourceFile,
+    descriptions_overlap,
+    file_kind,
+    is_same_merchant,
+    twin_dates_fit,
+)
+from app.services.transfer_marking import corrected_fields
 
 logger = logging.getLogger("finance")
 
@@ -31,22 +42,11 @@ def _linked(tx: Transaction) -> bool:
 
 
 def _source(record: ImportRecord):
-    from app.services.duplicate_preview_service import SourceFile, file_kind
-
     return SourceFile(file_kind(record.filename), record.period_start, record.period_end)
 
 
 def find_twins(session: Session) -> list[tuple[Transaction, Transaction]]:
     """(kept, duplicate) pairs."""
-    from app.services.duplicate_preview_service import (
-        CROSS_FILE_DATE_WINDOW_DAYS,
-        _descriptions_overlap,
-        _same_merchant,
-        file_kind,
-        twin_dates_fit,
-    )
-    from app.services.transfer_marking import corrected_fields
-
     rows = [
         (tx, record) for tx, record in session.exec(
             select(Transaction, ImportRecord)
@@ -73,8 +73,8 @@ def find_twins(session: Session) -> list[tuple[Transaction, Transaction]]:
                 for other, other_record in exports
                 if other.id not in used and abs((other.transaction_date - tx.transaction_date).days) <= CROSS_FILE_DATE_WINDOW_DAYS
                 and twin_dates_fit(tx.transaction_date, _source(record), other.transaction_date, _source(other_record))
-                and (_same_merchant(tx.merchant, other.merchant)
-                     or _descriptions_overlap(tx.normalized_description, other.normalized_description))
+                and (is_same_merchant(tx.merchant, other.merchant)
+                     or descriptions_overlap(tx.normalized_description, other.normalized_description))
             ]
             if not candidates:
                 continue
@@ -94,9 +94,6 @@ def find_twins(session: Session) -> list[tuple[Transaction, Transaction]]:
 
 def merge_cross_file_twins(session: Session, force: bool = False) -> int:
     """Returns how many bookings were counted twice. Never keeps the app from starting."""
-    from app.config import settings
-    from app.reconciliation.engine import reconcile_statement
-
     marker = settings.data_dir / TWINS_MARKER
     try:
         if not force and marker.exists() and marker.read_text(encoding="utf-8").strip() == TWINS_VERSION:

@@ -19,6 +19,15 @@ from sqlmodel import Session, SQLModel, delete, select, update
 
 from app.config import settings
 from app.db.models import ImportRecord, RawTransaction
+from app.db.session import session_scope
+from app.normalization.category import sync_default_category_rules
+from app.normalization.merchant import sync_default_merchant_rules
+from app.services.account_recognition import SIGNATURES_MARKER
+from app.services.import_staging import is_app_document, stored_relative_name
+from app.services.points_service import POINTS_MARKER
+from app.services.rule_service import RULES_MARKER
+from app.services.statement_refresh import STATEMENTS_MARKER
+from app.services.twin_merge import TWINS_MARKER
 
 logger = logging.getLogger("finance")
 
@@ -55,8 +64,6 @@ def _empty_folder(folder: Path) -> int:
 def _delete_stored_documents(stored_paths: set[str]) -> int:
     """The imports' stored originals (and copies left by imports that
     failed); other files in the folder stay."""
-    from app.services.import_staging import is_app_document
-
     folder = settings.imports_dir
     if not folder.exists():
         return 0
@@ -88,8 +95,6 @@ def _delete_backups() -> int:
 
 
 def reset_everything(session: Session, delete_backups: bool = False) -> ResetResult:
-    from app.services.import_staging import stored_relative_name
-
     # (known only while the imports are still in the database)
     stored_paths = {stored_relative_name(path) for path in session.exec(select(ImportRecord.stored_path)).all()}
 
@@ -115,20 +120,10 @@ def reset_everything(session: Session, delete_backups: bool = False) -> ResetRes
     if delete_backups:
         files += _delete_backups()
     # start-up work a fresh database needs again
-    from app.services.account_recognition import SIGNATURES_MARKER
-    from app.services.points_service import POINTS_MARKER
-    from app.services.rule_service import RULES_MARKER
-    from app.services.statement_refresh import STATEMENTS_MARKER
-    from app.services.twin_merge import TWINS_MARKER
-
     for marker in (RULES_MARKER, POINTS_MARKER, STATEMENTS_MARKER, SIGNATURES_MARKER, TWINS_MARKER):
         (settings.data_dir / marker).unlink(missing_ok=True)
 
     # the built-in rules come back at once (user-made ones are gone)
-    from app.db.session import session_scope
-    from app.normalization.category import sync_default_category_rules
-    from app.normalization.merchant import sync_default_merchant_rules
-
     with session_scope() as fresh:
         sync_default_merchant_rules(fresh)
         sync_default_category_rules(fresh)

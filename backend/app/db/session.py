@@ -18,6 +18,8 @@ from sqlalchemy.orm import Session as OrmSession
 from sqlmodel import Session, create_engine
 
 from app.config import settings
+from app.db.migrate import run_migrations_to_head
+from app.db.models import Transaction
 
 # Serializes the few multi-step operations that must never interleave
 # (committing an import, restoring a backup, a full transfer re-scan) —
@@ -106,8 +108,6 @@ def note_data_changed() -> None:
 def _touches_payees(session) -> bool:
     from sqlalchemy import inspect as state_of
 
-    from app.db.models import Transaction
-
     if any(isinstance(obj, Transaction) for obj in (*session.new, *session.deleted)):
         return True
     for obj in session.dirty:
@@ -182,8 +182,6 @@ def init_db() -> None:
     against throwaway databases, so this function only runs for the real
     application.
     """
-    from app.db.migrate import run_migrations_to_head
-
     run_migrations_to_head()
 
 

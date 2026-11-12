@@ -6,7 +6,8 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.db.models import Account, AccountType, Transaction
 from app.importers.xlsx_importer import XLSXImporter
-from app.services.import_service import ImportServiceError, commit_parsed_import, parse_file
+from app.services.import_reading import ImportServiceError, parse_file
+from app.services.import_service import commit_parsed_import
 from tests.xlsx_fixtures import write_xlsx
 
 

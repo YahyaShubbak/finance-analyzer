@@ -245,8 +245,7 @@ def test_payments_onto_a_card_need_no_review_and_are_sorted_again_when_released(
 
     import app.db.session as db_session
     from app.db.models import Transaction
-    from app.services.transfer_detection_service import unpair_transfer
-    from app.services.transfer_marking import settle_flagged_transfers
+    from app.services.transfer_marking import settle_flagged_transfers, unpair_transfer
 
     giro = _account(client, "Giro", "checking")
     card = _account(client, "Karte", "credit_card")

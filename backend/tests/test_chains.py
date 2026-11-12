@@ -5,7 +5,7 @@ import io
 
 from app.normalization.merchant import normalize_merchant
 from app.services.chains import find_chains, stem
-from app.services.rule_service import derive_category_pattern
+from app.services.rule_patterns import derive_category_pattern
 
 
 def test_branch_parts_are_cut_off():

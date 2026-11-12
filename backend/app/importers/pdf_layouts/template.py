@@ -21,6 +21,7 @@ from app.db.models import DocumentType
 from app.i18n import tr
 from app.importers.parsing_utils import AmountParseError, parse_amount_to_minor_units
 from app.importers.pdf_layouts.base import PDFParsedLine, PDFParseResult, booked_amount_minor
+from app.importers.pdf_layouts.lines import group_lines
 from app.importers.pdf_layouts.patterns import complete_date, parse_period, reference_date
 
 _DATE_RE = re.compile(r"^\d{1,2}[./]\d{1,2}[./]?(?:\d{2,4})?$")
@@ -37,14 +38,12 @@ SIGN_RULES = ("as_printed", "unsigned_is_expense", "unsigned_is_income")
 
 def _lines(pages: list[list[tuple]]) -> list[tuple[int, int, list[tuple]]]:
     """(line index as in the extracted text, page, words sorted by x)."""
-    from app.importers.pdf_importer import _group_lines  # the same line grouping as the text
-
     out, index = [], 0
     for page_no, words in enumerate(pages):
         if not words:
             index += 1
             continue
-        for line in _group_lines(words):
+        for line in group_lines(words):
             out.append((index, page_no, line))
             index += 1
     return out

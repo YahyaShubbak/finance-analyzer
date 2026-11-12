@@ -16,9 +16,12 @@ from datetime import date
 
 from sqlmodel import Session, delete, func, select
 
+from app.config import settings
 from app.db.chunks import chunked
 from app.db.models import ImportRecord, ImportStatus, PointsEntry, PointsProgram, RawTransaction, Transaction
 from app.importers.base import ParsedImport, ParseOptions
+from app.services.import_reading import parse_file
+from app.services.import_staging import stored_import_path
 
 logger = logging.getLogger("finance")
 
@@ -99,10 +102,6 @@ def backfill_points(session: Session, force: bool = False) -> None:
     """On start-up, once per POINTS_VERSION (force: after restoring a
     backup): read the points of the PDF statements imported before, or with
     an older reader. Never keeps the app from starting."""
-    from app.config import settings
-    from app.services.import_service import parse_file
-    from app.services.import_staging import stored_import_path
-
     marker = settings.data_dir / POINTS_MARKER
     try:
         if not force and marker.exists() and marker.read_text(encoding="utf-8").strip() == POINTS_VERSION:

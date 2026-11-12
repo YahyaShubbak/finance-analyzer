@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 from app.db.models import Account, AccountType, CreditCardStatement, RawTransaction, Transaction, TransactionType
 from app.reconciliation.engine import compute_reconciliation, current_bank_payment, statement_transaction_ids
 from app.schemas.credit_card import CreditCardSummary, StatementSummary
-from app.services.account_service import compute_account_summaries
+from app.services.account_service import account_read, compute_account_summaries
 
 
 def _count_statement_transactions(session: Session, statement: CreditCardStatement) -> int:
@@ -53,8 +53,6 @@ def _payment_links(session: Session, account_id: int) -> tuple[int, int]:
 
 
 def list_credit_card_summaries(session: Session) -> list[CreditCardSummary]:
-    from app.api.routes.accounts import _to_read  # reuse the single AccountRead-building logic
-
     accounts = session.exec(select(Account).where(Account.account_type == AccountType.CREDIT_CARD)).all()
     account_summaries = compute_account_summaries(session)
 
@@ -66,12 +64,12 @@ def list_credit_card_summaries(session: Session) -> list[CreditCardSummary]:
             .order_by(CreditCardStatement.statement_period_end.desc())
         ).all()
 
-        account_read = _to_read(account, account_summaries)
+        shown = account_read(account, account_summaries)
         latest = build_statement_summary(session, statements[0]) if statements else None
 
         linked, unlinked = _payment_links(session, account.id)
         results.append(CreditCardSummary(
-            account=account_read, statement_count=len(statements), latest_statement=latest,
+            account=shown, statement_count=len(statements), latest_statement=latest,
             payments_linked=linked, payments_unlinked=unlinked,
         ))
 

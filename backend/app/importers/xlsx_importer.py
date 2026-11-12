@@ -15,7 +15,7 @@ from openpyxl import load_workbook
 from app.i18n import tr
 from app.importers.base import BaseImporter, ParsedImport
 from app.importers.column_detection import detect_header_row
-from app.importers.tabular import MAX_TABLE_CELLS, MAX_TABLE_ROWS, _error_result, parse_rows, too_large
+from app.importers.tabular import MAX_TABLE_CELLS, MAX_TABLE_ROWS, error_result, parse_rows, too_large
 
 _SCAN_ROWS = 30
 
@@ -29,7 +29,7 @@ class XLSXImporter(BaseImporter):
         checksum = hashlib.sha256(raw_bytes).hexdigest()
 
         def unreadable(exc: Exception) -> ParsedImport:
-            return _error_result(self.original_filename, checksum, tr(
+            return error_result(self.original_filename, checksum, tr(
                 "Could not open the spreadsheet — it may be damaged or not an XLSX file ({error}).",
                 error=type(exc).__name__))
 
@@ -56,7 +56,7 @@ class XLSXImporter(BaseImporter):
             workbook.close()
 
         if not sheets:
-            return _error_result(self.original_filename, checksum, tr("The spreadsheet is empty."))
+            return error_result(self.original_filename, checksum, tr("The spreadsheet is empty."))
 
         # First sheet that contains a recognizable transaction table;
         # otherwise the first non-empty sheet (-> manual mapping).

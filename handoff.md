@@ -8,24 +8,22 @@ Tests und die Doku im Repo sind Englisch.
 
 Ein Architektur-Audit des Repos (Version 0.8.0) hat 15 größere Befunde
 (Nr. 1–15) und eine Tabelle kleiner „Quick Wins“ ergeben. Erledigt und
-getestet sind die Befunde 1–10, 12 und großteils 14 sowie ein Teil der Quick Wins (Abschnitt
-„Quick Wins“). Offen sind die Befunde 11, 13, 15, Reste von 7, 8 und 14 und der Rest der Quick Wins.
+getestet sind die Befunde 1–12 und großteils 14 sowie ein Teil der Quick Wins (Abschnitt
+„Quick Wins“). Offen sind die Befunde 13, 15, Reste von 7, 8 und 14 und der Rest der Quick Wins.
 
 Der Nutzer committet selbst. Die Befunde 1–6 stehen in Commit `68a370d`
 ("Harden imports, restores, and schema upgrades"); der Stand davor war
 `f0a3d0f`. Die neun erledigten Quick Wins sind ebenfalls committet (bis
 `7b5b058`), Befund 12 in `899e8b4`, Befund 14 und die kleinen Frontend-Punkte
-danach, die Befunde 7–9 in `fe7c671` und `2b37ef1`. Befund 10 lag am
-2026-11-12 noch uncommittet im Arbeitsverzeichnis (Commit-Message im Chat des
-Nutzers): im Backend `app/db/models.py`, `app/db/migrate.py`, die neue
-Migration `app/db/migrations/versions/a6f4c2d81e93_raw_row_links_as_columns.py`,
-`app/reconciliation/engine.py`, `app/services/` (`import_service`,
-`import_removal_service`, `location_service`, `points_service`,
-`reset_service`, `twin_merge`) und die Tests `conftest.py`,
-`test_raw_row_links.py` (neu), `test_migrations.py`, `test_points.py`; dazu
-`CHANGELOG.md` und `handoff.md`. Vor neuer Arbeit mit `git status` prüfen, ob
-das inzwischen committet ist — wenn nicht, den Nutzer darauf hinweisen und
-diese Dateien nicht anfassen.
+danach, die Befunde 7–9 in `fe7c671` und `2b37ef1`, Befund 10 in `f88a6fc`.
+Befund 11 lag am 2026-11-12 noch uncommittet im Arbeitsverzeichnis
+(Commit-Message im Chat des Nutzers): 42 geänderte und 7 neue Dateien, alle
+unter `backend/` (neu: `app/iban.py`, `app/api/transaction_listing.py`,
+`app/importers/pdf_layouts/lines.py`, `app/services/card_bill_linking.py`,
+`app/services/import_reading.py`, `app/services/rule_patterns.py`,
+`tests/test_architecture.py`), dazu `handoff.md`. Vor neuer Arbeit mit
+`git status` prüfen, ob das inzwischen committet ist — wenn nicht, den Nutzer
+darauf hinweisen und diese Dateien nicht anfassen.
 
 ## Arbeitsweise, die der Nutzer erwartet
 
@@ -48,7 +46,7 @@ Backend (in `backend/`, venv per `uv sync --locked`):
 
 ```
 uv run --locked ruff check app tests
-uv run --locked pytest -q -p no:cacheprovider          # ca. 2,5 min, zuletzt 825 bestanden
+uv run --locked pytest -q -p no:cacheprovider          # ca. 2,5 min, zuletzt 831 bestanden
 FINANCE_DATA_DIR=<leerer Temp-Ordner> uv run --locked alembic upgrade head
 FINANCE_DATA_DIR=<derselbe>           uv run --locked alembic check
 ```
@@ -84,6 +82,16 @@ das ist das `--stop`, kein Fehler.
   `_detect_unversioned_revision` (`backend/app/db/migrate.py`), sonst
   bekommen die Test-Datenbanken (per `create_all` gebaut) eine falsche
   Revision. `alembic check` muss leer bleiben.
+- `tests/test_architecture.py` liest die Imports aus dem Quelltext und
+  verlangt: kein Modul braucht ein Modul, das es selbst braucht (auch nicht
+  über einen Import in einer Funktion); Imports eigener Module stehen am
+  Modulanfang (einzige Ausnahme, im Test aufgelistet: `reset_service` liest
+  `engine` erst beim Aufruf); kein `_privater` Name wird aus einem anderen
+  Modul importiert; `db`, `importers`, `normalization` importieren nichts
+  aus `services`, `reconciliation`, `schemas`, `api`; nur `api` und `main`
+  importieren `api`, und keine Route importiert eine andere Route. Schlägt
+  einer dieser Tests fehl, gehört die Hilfsfunktion in ein Modul, das beide
+  Seiten benutzen dürfen — nicht der Import in die Funktion.
 - Die Test-Engines erzwingen Fremdschlüssel wie die echte App
   (`enforce_foreign_keys` in `tests/conftest.py`). Vorher liefen die Tests
   ohne `PRAGMA foreign_keys=ON`, die App mit. Wer in einem Test eine eigene
@@ -124,7 +132,7 @@ gleichem Betrag wird weiterhin automatisch verknüpft. Eine strengere Regel
 („nur was wie eine Kartenabrechnung aussieht“) würde das Verknüpfen für jeden
 Herausgeber abschalten, dessen Abbuchungstext keine Regel kennt.
 
-## Befunde 7–15: Stand (7–10 und 12 erledigt, 14 großteils; offen 11, 13, 15)
+## Befunde 7–15: Stand (7–12 erledigt, 14 großteils; offen 13, 15)
 
 Zeilennummern stammen vom Audit-Stand und können sich verschoben haben; die
 Funktionsnamen sind verlässlich.
@@ -234,14 +242,58 @@ direkt auf). Vorher → nachher:
   `_counterparty_iban`, `_value_date`) sind Daten der Zeile, keine
   Verknüpfungen, und bleiben dort.
 
-### 11. Zyklische Service-Abhängigkeiten (108 funktionslokale Imports)
-- Wo u. a.: `credit_card_service.py` importiert `_to_read` aus
-  `api/routes/accounts.py`; `api/routes/analytics.py` importiert Privates aus
-  `routes/transactions.py`; `_valid_iban` / `_IBAN_RE`
-  (`account_recognition.py`), `_group_lines` (`pdf_importer.py`), `_places`
-  (`normalization/location.py`) werden modulübergreifend genutzt.
-- Fix: drei Blattmodule herauslösen (`app/iban.py`, Read-Builder unter
-  `schemas/`, PDF-Zeilengruppierung nach `importers/pdf_layouts/`).
+### 11. Zyklische Service-Abhängigkeiten (108 funktionslokale Imports) — erledigt
+- Ausgangslage, gemessen: 117 funktionslokale Imports eigener Module und
+  zwei Gruppen von Modulen, die sich im Kreis brauchten —
+  `pdf_importer` ↔ `pdf_layouts/template` und neun Module um
+  `reconciliation/engine`, `import_service`, `rule_service`,
+  `transfer_marking`, `transfer_detection_service`,
+  `duplicate_preview_service`, `account_recognition`, `chains`,
+  `points_service`.
+- Umgesetzt — Hilfsfunktionen dorthin verschoben, wo beide Seiten sie holen
+  dürfen (Verhalten unverändert, nur der Ort):
+  - `app/iban.py`: `IBAN_RE`, `valid_iban` (aus `account_recognition`).
+  - `app/services/import_reading.py`: `ImportServiceError`,
+    `build_importer_for`, `parse_file`, `document_account_mismatch`,
+    `document_account_warning`, `purchases_listed_as_positive` (aus
+    `import_service`; Lesen einer Datei ohne Datenbank).
+  - `app/services/rule_patterns.py`: `derive_merchant_pattern`,
+    `derive_category_pattern`, `category_rule_source`, `raw_extra`,
+    `raw_counterparty` samt Wortlisten (aus `rule_service`; reine
+    Textfunktionen).
+  - `transfer_marking.py` hat jetzt auch `natural_type`,
+    `manually_corrected_type_ids`, `unpair_transfer` (aus
+    `transfer_detection_service`); der Start-Job `link_card_bills` ist nach
+    `app/services/card_bill_linking.py` gezogen (er ruft Abgleich und
+    Transfer-Erkennung nacheinander auf und steht deshalb über beiden).
+  - `account_read` in `services/account_service.py` (vorher `_to_read` in
+    `api/routes/accounts.py`, von `credit_card_service` aus der Route
+    geholt); `app/api/transaction_listing.py` mit `transaction_read`,
+    `search_filter`, `sorted_by`, `TransactionSort`, `SortOrder` (vorher in
+    `routes/transactions.py`, von `routes/analytics.py` importiert).
+  - `app/importers/pdf_layouts/lines.py`: `group_lines`.
+  - Umbenannt, weil von einem zweiten Modul benutzt: `places`, `NOT_A_TOWN`
+    (`normalization/location.py`), `error_result` (`importers/tabular.py`),
+    `validate_currency` (`schemas/account.py`), `descriptions_overlap`,
+    `is_same_merchant` (`duplicate_preview_service.py`).
+- Danach ist der Importgraph zyklenfrei, und 114 der 115 verbliebenen
+  funktionslokalen Imports stehen jetzt am Modulanfang. Reihenfolge der
+  Dienste von unten nach oben: `iban`, `import_reading`, `rule_patterns` →
+  `account_recognition`, `chains`, `category_memory` →
+  `duplicate_preview_service` → `transfer_marking` →
+  `transfer_detection_service`, `reconciliation/engine` →
+  `card_bill_linking`, `rule_service`, `points_service` → `import_service`.
+- Abgesichert durch `tests/test_architecture.py` (siehe „Regeln des
+  Repos“); vier der sechs Tests schlagen auf dem Stand davor fehl, die
+  anderen zwei schreiben fest, was schon galt.
+- Geprüft außer mit Tests: echte App auf einem leeren Datenordner gestartet
+  und die Frontend-Tests dagegen laufen lassen (elf Läufe: zehnmal 58
+  bestanden; im allerersten Lauf schlug ein Test fehl, dessen Name nicht
+  festgehalten wurde und der sich nicht wiederholen ließ — bei einem
+  erneuten Auftreten nachgehen).
+- Bewusst nicht angefasst: funktionslokale Imports fremder Pakete
+  (`sqlalchemy`, `fastapi.responses`) und die in Tests. Kein Eintrag im
+  Changelog (für Nutzer ändert sich nichts).
 
 ### 12. Restore und Reset behandeln `imports_dir` als app-exklusiv — erledigt
 - Umgesetzt: `is_app_document` (`services/import_staging.py`) sagt, was im

@@ -228,8 +228,9 @@ def test_import_removal_persists_across_restart(tmp_path):
     from sqlmodel import Session, SQLModel, create_engine, select
 
     from app.db.models import Account, AccountType, Transaction
+    from app.services.import_reading import parse_file
     from app.services.import_removal_service import remove_import
-    from app.services.import_service import commit_parsed_import, parse_file
+    from app.services.import_service import commit_parsed_import
 
     db_path = tmp_path / "finance.db"
     engine = create_engine(f"sqlite:///{db_path}")

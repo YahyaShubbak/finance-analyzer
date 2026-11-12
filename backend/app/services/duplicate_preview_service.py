@@ -38,8 +38,18 @@ from datetime import date, timedelta
 from sqlmodel import Session, select
 
 from app.db.chunks import chunked
-from app.db.models import Account, AccountType, CategoryRule, MerchantRule, RawTransaction, Transaction, TransactionType
+from app.db.models import (
+    Account,
+    AccountType,
+    CategoryRule,
+    ImportRecord,
+    MerchantRule,
+    RawTransaction,
+    Transaction,
+    TransactionType,
+)
 from app.i18n import tr
+from app.iban import valid_iban
 from app.importers.base import ParsedTransaction
 from app.normalization.category import (
     CARD_ACCOUNT_EXCLUDED,
@@ -49,6 +59,8 @@ from app.normalization.category import (
 )
 from app.normalization.merchant import normalize_merchant, sync_default_merchant_rules
 from app.normalization.review import REFUND_FROM_SOMEONE_ELSE, compute_review_status
+from app.services.account_recognition import own_ibans_by_account
+from app.services.category_memory import category_memory
 from app.services.duplicate_detection import compute_duplicate_fingerprint
 
 POSSIBLE_DUPLICATE_DATE_WINDOW_DAYS = 2
@@ -89,12 +101,10 @@ def paid_by_someone_else(account_id: int, texts: list[str | None], counterparty_
     """The money came from an IBAN that is none of the user's accounts (say,
     a friend repaying a flight booked for them): a refund of that expense.
     Unknowable while none of the user's own IBANs is known."""
-    from app.services.account_recognition import _valid_iban
-
     known = set().union(*own_ibans.values()) if own_ibans else set()
     if not known:
         return False
-    named = {iban for m in _IBAN_IN_TEXT_RE.finditer(" ".join(t for t in texts if t)) if (iban := _valid_iban(m.group(0)))}
+    named = {iban for m in _IBAN_IN_TEXT_RE.finditer(" ".join(t for t in texts if t)) if (iban := valid_iban(m.group(0)))}
     if counterparty_iban:
         named.add(counterparty_iban.replace(" ", "").upper())
     named -= own_ibans.get(account_id, set())  # the card's own account number
@@ -147,7 +157,7 @@ def _tokens(text: str | None) -> set[str]:
     return {t for t in re.findall(r"[a-zäöüß]{3,}", (text or "").lower())}
 
 
-def _descriptions_overlap(a: str | None, b: str | None) -> bool:
+def descriptions_overlap(a: str | None, b: str | None) -> bool:
     ta, tb = _tokens(a), _tokens(b)
     if not ta or not tb:
         return False
@@ -227,8 +237,6 @@ class SourceFile:
 
 
 def _existing_sources(session: Session, tx_ids: list[int]) -> dict[int, SourceFile]:
-    from app.db.models import ImportRecord
-
     out: dict[int, SourceFile] = {}
     for chunk in chunked(tx_ids):
         for tx_id, filename, start, end in session.exec(
@@ -266,7 +274,7 @@ def twin_dates_fit(pdf_date: date, pdf: SourceFile | None, export_date: date, ex
             and _within(pdf_date, export, slack_before=CROSS_FILE_DATE_WINDOW_DAYS))
 
 
-def _same_merchant(a: str | None, b: str | None) -> bool:
+def is_same_merchant(a: str | None, b: str | None) -> bool:
     return a is not None and b is not None and a.strip().lower() == b.strip().lower()
 
 
@@ -282,11 +290,7 @@ def classify_import_rows(
     if isinstance(account, int):
         account = session.get(Account, account)
     merchant_rules, category_rules = load_rules(session)
-    from app.services.category_memory import category_memory
-
     memory = category_memory(session)
-    from app.services.account_recognition import own_ibans_by_account
-
     own_ibans = own_ibans_by_account(session)
 
     # Only bookings near the file's dates can be a row's duplicate (same date, or a few days
@@ -408,7 +412,7 @@ def classify_import_rows(
                 merchant is not None and existing.merchant is not None
                 and existing.merchant.strip().lower() == merchant.strip().lower()
             )
-            if not (same_merchant or _descriptions_overlap(existing.normalized_description, ptx.original_description)):
+            if not (same_merchant or descriptions_overlap(existing.normalized_description, ptx.original_description)):
                 continue
             if best_gap is None or gap < best_gap:
                 best, best_gap, best_same_merchant = existing, gap, same_merchant
@@ -446,8 +450,8 @@ def _twin_from_other_file(candidates: list[Transaction], new_date: date, merchan
         other_counterparty = existing_counterparty.get(existing.id)
         if own_counterparty and other_counterparty and other_counterparty != own_counterparty:
             continue
-        if not (_same_merchant(merchant, existing.merchant)
-                or _descriptions_overlap(existing.normalized_description, description)):
+        if not (is_same_merchant(merchant, existing.merchant)
+                or descriptions_overlap(existing.normalized_description, description)):
             continue
         if best is None or gap < best[1]:
             best = (existing, gap)

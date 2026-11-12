@@ -43,15 +43,27 @@ from app.db.models import (
     Account,
     AccountType,
     CreditCardStatement,
+    DocumentType,
+    ImportRecord,
+    ImportStatus,
     RawTransaction,
     Reconciliation,
     ReconciliationStatus,
     Transaction,
     TransactionType,
+    UserCorrection,
     utcnow,
 )
 from app.i18n import tr
 from app.normalization.category import UNSORTED_CATEGORIES
+from app.services.transfer_marking import (
+    corrected_fields,
+    manually_corrected_type_ids,
+    natural_type,
+    release_from_transfer,
+    settle_as_transfer,
+    unpair_transfer,
+)
 
 DEFAULT_BANK_MATCH_DAY_WINDOW = 15
 # A card's direct debit comes on its due date, often two to three weeks after
@@ -142,8 +154,6 @@ def find_candidate_bank_debits(
     if not statement.statement_total_minor or statement.statement_period_end is None:
         return []  # no amount, or nothing owed (a credit balance): no debit to look for
 
-    from app.services.transfer_detection_service import manually_corrected_type_ids
-
     window_start = statement.statement_period_end - timedelta(days=_WINDOW_DAYS_BEFORE_PERIOD_END)
     window_end = statement.statement_period_end + timedelta(days=max(max_day_gap, SUGGESTION_MAX_DAY_GAP))
     bank_accounts = session.exec(select(Account.id).where(Account.account_type != AccountType.CREDIT_CARD)).all()
@@ -210,8 +220,6 @@ def _known_to_be_a_purchase(session: Session, tx: Transaction) -> bool:
     """A rule or the user sorted this debit as something bought or paid for
     (50.00 at the cash machine, groceries, the rent) — not as a card bill,
     and not left unsorted as an issuer's debit no rule knows is."""
-    from app.services.transfer_marking import corrected_fields
-
     if tx.is_transfer or tx.category in CARD_BILL_CATEGORIES:
         return False
     if tx.category is not None and tx.category not in UNSORTED_CATEGORIES:
@@ -425,8 +433,6 @@ get_ambiguous_candidates = get_suggested_payments
 # ---------------------------------------------------------------------------
 
 def latest_corrected_type(session: Session, tx_id: int) -> TransactionType | None:
-    from app.db.models import UserCorrection
-
     value = session.exec(
         select(UserCorrection.new_value)
         .where(UserCorrection.transaction_id == tx_id, UserCorrection.field == "transaction_type")
@@ -441,9 +447,6 @@ def latest_corrected_type(session: Session, tx_id: int) -> TransactionType | Non
 def release_payment(session: Session, tx: Transaction) -> None:
     """Turn a statement's payment back into an ordinary bank transaction —
     unless the user explicitly set its type, which always wins."""
-    from app.services.transfer_detection_service import manually_corrected_type_ids, natural_type
-    from app.services.transfer_marking import corrected_fields, release_from_transfer
-
     tx.settles_statement_id = None
     chosen = latest_corrected_type(session, tx.id) if tx.id in manually_corrected_type_ids(session) else None
     if chosen != TransactionType.TRANSFER:
@@ -455,8 +458,6 @@ def release_payment(session: Session, tx: Transaction) -> None:
 
 
 def _claim_payment(session: Session, tx: Transaction, statement: CreditCardStatement) -> None:
-    from app.services.transfer_marking import corrected_fields, settle_as_transfer
-
     if tx.transfer_pair_id is not None:
         # it was paired with the payment arriving on the card; the statement accounts for it now
         partner = session.get(Transaction, tx.transfer_pair_id)
@@ -502,7 +503,6 @@ def reconcile_statement(
         if bank_tx.settles_statement_id not in (None, statement.id):
             raise ReconciliationError(tr("This transaction is already the payment of another statement."))
         if bank_tx.transfer_pair_id is not None:
-            from app.services.transfer_detection_service import unpair_transfer
             unpair_transfer(session, bank_tx)
     elif clear_bank_payment:
         bank_tx = None
@@ -552,8 +552,6 @@ def derive_statements_from_exports(session: Session) -> int:
     — e.g. one billing period exported as CSV. Without this, the purchases
     and the bill would both count as expenses. The statement is created
     (marked as derived) and reconciled; returns how many were created."""
-    from app.db.models import DocumentType, ImportRecord, ImportStatus
-
     card_ids = set(session.exec(select(Account.id).where(Account.account_type == AccountType.CREDIT_CARD)).all())
     if not card_ids:
         return 0

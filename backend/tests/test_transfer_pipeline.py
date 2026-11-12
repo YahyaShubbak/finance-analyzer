@@ -241,7 +241,8 @@ def test_transfer_detection_persists_across_restart(tmp_path):
     from sqlmodel import Session, SQLModel, create_engine, select
 
     from app.db.models import Account, AccountType, Transaction
-    from app.services.import_service import commit_parsed_import, parse_file
+    from app.services.import_reading import parse_file
+    from app.services.import_service import commit_parsed_import
     from tests.pdf_fixtures import write_text_pdf  # noqa: F401 (not used, keeps import style consistent)
 
     db_path = tmp_path / "finance.db"

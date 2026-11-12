@@ -65,7 +65,7 @@ class _Town:
 
 
 @cache
-def _places() -> dict[str, _Town]:
+def places() -> dict[str, _Town]:
     index: dict[str, _Town] = {}
     with gzip.open(PLACES_FILE, "rt", encoding="utf-8") as f:
         for line in f:
@@ -81,7 +81,7 @@ def _places() -> dict[str, _Town]:
 
 # Words at the end of a merchant text that are a place name somewhere in the
 # world but on a statement mean something else.
-_NOT_A_TOWN = frozenset("""
+NOT_A_TOWN = frozenset("""
     AG BANK BAR BEACH BERG BURG CAFE CARD CASH CENTER CENTRE CITY CLUB DEUTSCHLAND
     DIENST DIREKT DORF EUROPE FILIALE FOOD GERMANY GMBH GROUP HAUS HOF HOTEL
     INTERNATIONAL KG KIOSK LAND MARKET MARKT MITTE MOBILE NORD NORTH OST ONLINE
@@ -140,9 +140,9 @@ def _display_name(town: _Town, printed: str) -> str:
 
 def _lookup(name: str, country: str | None = None) -> _Town | None:
     key = place_key(name)
-    if not key or key in _NOT_A_TOWN or len(key) < 3:
+    if not key or key in NOT_A_TOWN or len(key) < 3:
         return None
-    town = _places().get(key)
+    town = places().get(key)
     if town is None or (country and town.country != country):
         return None
     return town

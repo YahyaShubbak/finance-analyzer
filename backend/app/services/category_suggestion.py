@@ -17,6 +17,7 @@ from collections import Counter, defaultdict
 from sqlmodel import Session, select
 
 from app.db.models import RawTransaction, Transaction, TransactionType
+from app.db.session import remembered
 from app.normalization.category import NO_SIGNAL_CATEGORIES, UNSORTED_CATEGORIES
 
 MIN_CONFIDENCE = 0.8
@@ -90,8 +91,6 @@ class UnsortedSuggestions:
         if tx.is_transfer or not (tx.category is None or tx.category in UNSORTED_CATEGORIES):
             return None
         if self._suggester is None:
-            from app.db.session import remembered
-
             # the model reads every sorted booking: built once per state of the data, not per page
             self._suggester = remembered(self._session, "category_suggester", lambda: CategorySuggester(self._session))
         raw = tx.raw_transaction

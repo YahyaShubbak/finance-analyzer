@@ -7,24 +7,17 @@ rules ahead of built-in defaults — this module only needs to create rules
 with is_user_defined=True and the two normalization functions already do
 the right thing for every future import.
 
-Pattern derivation for merchant rules deliberately strips the
-transaction-specific noise (trailing order/reference codes) so a rule
-generalizes to future variants of the same merchant (e.g.
-"AMZN Mktp DE*AB1234" -> pattern "AMZN Mktp DE", matching a future
-"AMZN Mktp DE*XY9876" too) while staying a plain substring match — no
-regex required, fully explainable. It never strips so much that only a
-payment processor or booking type remains ("PAYPAL *NETFLIX.COM" must not
-become "PAYPAL", which would rename every future PayPal payment).
+Which text of a booking a rule matches is worked out in
+app.services.rule_patterns.
 """
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
-from functools import lru_cache
 
 from sqlmodel import Session, select
 
+from app.config import settings
 from app.db.models import (
     Account,
     AccountType,
@@ -40,16 +33,26 @@ from app.db.models import (
 # every database connection opened from then on - _could_contain relies on it)
 from app.db.session import fold_text
 from app.i18n import tr
-from app.normalization.category import UNSORTED_CATEGORIES
-
-# "*AB1234" — a code containing a digit. "*NETFLIX.COM" (no digit) is the
-# actual merchant behind a payment processor and is kept.
-_TRAILING_CODE_RE = re.compile(r"\*(?=\S*\d)\S+$")
-# A whitespace-separated trailing numeric token of 2+ digits is almost
-# always a transaction/order/reference number, not part of the merchant
-# name itself (the whitespace requirement avoids stripping something like
-# "Store24", where the digits are fused to the name).
-_TRAILING_DIGITS_RE = re.compile(r"\s+\d{2,}\s*$")
+from app.normalization.category import (
+    CARD_ACCOUNT_EXCLUDED,
+    DEFAULT_CATEGORY_RULES,
+    UNSORTED_CATEGORIES,
+    categorize,
+    rule_could_match,
+    rule_matches,
+)
+from app.normalization.merchant import DEFAULT_MERCHANT_RULES, normalize_merchant
+from app.normalization.review import compute_review_status
+from app.services.category_memory import category_memory
+from app.services.chains import chain_index, payee_name
+from app.services.duplicate_preview_service import load_rules
+from app.services.rule_patterns import (
+    category_rule_source,
+    derive_merchant_pattern,
+    raw_counterparty,
+    raw_extra,
+)
+from app.services.transfer_marking import sort_card_bill_payees
 
 
 class RuleServiceError(Exception):
@@ -68,42 +71,6 @@ def _could_contain(pattern: str, *columns):
         return None
     escaped = fold_text(pattern).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return or_(*(func.fold(column).like(f"%{escaped}%", escape="\\") for column in columns))
-
-
-# Words that say HOW something was paid, not WHO was paid.
-_GENERIC_WORDS = {
-    "paypal", "sepa", "lastschrift", "kartenzahlung", "karte", "ueberweisung", "überweisung", "gutschrift",
-    "dauerauftrag", "visa", "mastercard", "girocard", "debit", "card", "payment", "zahlung", "einkauf",
-    "pos", "online", "purchase", "basislastschrift", "folgelastschrift", "sumup", "zettle", "google", "apple",
-    "pay", "ref", "eref", "mref", "svwz", "gmbh", "und", "the",
-}
-MIN_PATTERN_LENGTH = 4
-
-
-def derive_merchant_pattern(original_description: str) -> str:
-    original = original_description.strip()
-    text = _TRAILING_CODE_RE.sub("", original)
-    text = _TRAILING_DIGITS_RE.sub("", text)
-    text = text.strip(" -*#")
-    meaningful = [w for w in re.findall(r"[a-zäöüß]+", text.lower()) if len(w) >= 3 and w not in _GENERIC_WORDS]
-    if len(text) < MIN_PATTERN_LENGTH or not meaningful:
-        # Too little left to identify the merchant -> use the full text,
-        # which only matches this very specific description.
-        return original
-    return text
-
-
-def raw_extra(raw: RawTransaction | None, key: str) -> str | None:
-    if raw is None or not raw.extra_fields_json:
-        return None
-    try:
-        return json.loads(raw.extra_fields_json).get(key)
-    except (ValueError, AttributeError):
-        return None
-
-
-def raw_counterparty(raw: RawTransaction | None) -> str | None:
-    return raw_extra(raw, "_counterparty")
 
 
 def create_merchant_rule_from_transaction(
@@ -157,8 +124,6 @@ def create_merchant_rule_from_transaction(
 
 
 def _rename_matching(session: Session, rule: MerchantRule, skip_id: int) -> int:
-    from app.normalization.review import compute_review_status
-
     corrected = set(session.exec(select(UserCorrection.transaction_id, UserCorrection.field)).all())
     word = re.compile(rf"(?<!\w){re.escape(rule.pattern)}(?!\w)", re.IGNORECASE)
     changed = 0
@@ -184,98 +149,6 @@ def _rename_matching(session: Session, rule: MerchantRule, skip_id: int) -> int:
 
 # --- learning categories -------------------------------------------------------
 
-# Leading words that name the booking type, not the payee:
-# "Lastschrift / Belastung REWE Markt GmbH ..." -> "REWE Markt GmbH ...".
-_BOOKING_TYPE_WORDS = {
-    "lastschrift", "belastung", "gutschrift", "überweisung", "ueberweisung", "sepa", "sepa-lastschrift",
-    "sepa-überweisung", "sepa-ueberweisung", "sepa-gutschrift", "dauerauftrag", "kartenzahlung", "kartenumsatz",
-    "kartenverfügung", "girocard", "debitkarte", "basislastschrift", "folgelastschrift", "erstlastschrift",
-    "echtzeitüberweisung", "echtzeit-überweisung", "onlineüberweisung", "online-überweisung", "abbuchung",
-    "einzug", "zahlungseingang", "zahlungsausgang", "übertrag", "uebertrag", "umbuchung", "storno",
-    "rücklastschrift", "ruecklastschrift", "an", "von", "bei", "zugunsten", "auftraggeber",
-    "empfänger", "empfaenger", "payment", "purchase", "card", "pos",
-}
-# Where the payee's name ends and booking details begin.
-_STOP_WORDS = {
-    "vom", "am", "datum", "ref", "ref.", "referenz", "kundenreferenz", "mandatsreferenz", "mandat", "nr", "nr.",
-    "nummer", "rechnung", "rechnungsnr", "beleg", "kundennr", "iban", "bic", "iban:", "bic:", "eur", "euro",
-    "januar", "februar", "märz", "maerz", "april", "mai", "juni", "juli", "august", "september", "oktober",
-    "november", "dezember", "jan", "feb", "mär", "apr", "jun", "jul", "aug", "sep", "sept", "okt", "nov", "dez",
-    "january", "february", "march", "may", "june", "july", "october", "december", "oct", "dec",
-}
-# SEPA field markers, also when printed with a space before the "+" ("EREF + ...").
-_SEPA_MARKERS = {"eref", "mref", "kref", "svwz", "abwa", "abwe", "cred", "purp", "bref", "debt", "iban", "bic"}
-_STOP_PREFIXES = tuple(f"{marker}+" for marker in _SEPA_MARKERS) + ("end-to-end",)
-# Legal forms and fill words: never enough on their own to name a payee
-# ("PayPal Europe S.a.r.l. et Cie" must not become a rule for all PayPal payments).
-_NON_IDENTIFYING = _GENERIC_WORDS | {
-    "europe", "sarl", "cie", "sca", "ltd", "inc", "llc", "kg", "ag", "se", "co", "ohg", "ug", "mbh", "klarna",
-    "stripe", "adyen", "einkauf", "kauf", "danke", "vielen", "dank", "ihr", "ihre", "fuer", "für",
-    "übertrag", "uebertrag", "umbuchung", "storno",
-} | _SEPA_MARKERS
-_MAX_PATTERN_WORDS = 5
-
-
-def _identifying_words(text: str) -> list[str]:
-    return [w for w in re.findall(r"[a-zäöüß]+", text.lower()) if len(w) >= 3 and w not in _NON_IDENTIFYING]
-
-
-@lru_cache(maxsize=65536)  # chain_index asks for every payee text of every booking, on each request that needs it
-def derive_category_pattern(text: str) -> str | None:
-    """The part of a merchant/description that names WHO was paid, so a
-    learned category also fits the next booking with that payee:
-    "Lastschrift / Belastung REWE Markt GmbH Einkauf 12,34 EUR vom 01.09."
-    -> "REWE Markt GmbH". Booking type, amounts, dates, month names and
-    reference codes are left out. The result is always a substring of
-    `text` — or None when nothing in it identifies a payee (e.g. a bare
-    "PayPal Europe S.a.r.l." line: every PayPal payment looks like that, so
-    a rule would give all of them this one category)."""
-    original = text.strip()
-    tokens = list(re.finditer(r"\S+", original))
-    start = 0
-    while start < len(tokens):
-        word = tokens[start].group().lower().strip(":,")
-        if word in _BOOKING_TYPE_WORDS or not re.search(r"\w", word):
-            start += 1
-        elif start + 1 < len(tokens) and len(tokens[start + 1].group()) == 1 \
-                and word + tokens[start + 1].group().lower() in _BOOKING_TYPE_WORDS:
-            start += 2  # a booking word broken over two lines: "KARTENVERFÜGUN G"
-        else:
-            break
-    kept = []
-    for token in tokens[start:]:
-        word = token.group().lower()
-        if (any(ch.isdigit() for ch in word) or word.strip(",.;:+") in _STOP_WORDS | _SEPA_MARKERS
-                or word.startswith(_STOP_PREFIXES) or word == "+"):
-            break
-        if kept and word.endswith(":"):
-            break  # a field label ("Verwendungszweck:") ends the name
-        kept.append(token)
-        if len(kept) == _MAX_PATTERN_WORDS:
-            break
-    while kept and not _identifying_words(kept[-1].group()):
-        kept.pop()  # trailing "Einkauf", "GmbH,", "/" ...
-    # keep a legal form right after the name ("REWE Markt GmbH")
-    if kept:
-        following = tokens.index(kept[-1]) + 1
-        if following < len(tokens) and len(kept) < _MAX_PATTERN_WORDS \
-                and tokens[following].group().lower().strip(",.") in {"gmbh", "ag", "kg", "se", "ug", "ohg", "e.v."}:
-            kept.append(tokens[following])
-    if not kept:
-        return None
-    pattern = original[kept[0].start():kept[-1].end()].rstrip(",;:/-")
-    if len(pattern) < MIN_PATTERN_LENGTH or not _identifying_words(pattern):
-        return None
-    return pattern
-
-
-def category_rule_source(tx: Transaction) -> tuple[str, str]:
-    """(match_field, text the pattern is derived from)."""
-    if tx.merchant:
-        return "merchant", tx.merchant
-    return "description", tx.normalized_description or ""
-
-
 @dataclass
 class CategoryLesson:
     transaction: Transaction
@@ -292,8 +165,6 @@ def learn_category(session: Session, transaction_id: int, category: str,
     tx = session.get(Transaction, transaction_id)
     if tx is None:
         raise RuleServiceError(tr("Unknown transaction_id={transaction_id}", transaction_id=transaction_id))
-
-    from app.services.chains import chain_index, payee_name
 
     match_field, _source = category_rule_source(tx)
     # a chain's branch ("MERCADONA C/JACA VALENCIA"): learned for the whole chain ("MERCADONA")
@@ -345,10 +216,6 @@ def recategorize_matching(session: Session, rule: CategoryRule, skip_ids: frozen
     """Re-categorize the existing transactions `rule` matches with the current
     rule set (optionally as if `rule` did not exist). Manually corrected
     categories and transfers stay as they are. Returns how many changed."""
-    from app.normalization.category import CARD_ACCOUNT_EXCLUDED, categorize, rule_could_match, rule_matches
-    from app.normalization.review import compute_review_status
-    from app.services.duplicate_preview_service import load_rules
-
     _merchant_rules, category_rules = load_rules(session)
     if without_rule:
         category_rules = [r for r in category_rules if r.id != rule.id]
@@ -391,8 +258,6 @@ class LearnedRule:
 
 
 def list_learned_category_rules(session: Session) -> list[LearnedRule]:
-    from app.normalization.category import rule_could_match, rule_matches
-
     rules = session.exec(
         select(CategoryRule).where(CategoryRule.is_user_defined == True)  # noqa: E712
         .order_by(CategoryRule.category, CategoryRule.pattern)
@@ -435,11 +300,6 @@ def reapply_rules(session: Session) -> ReapplyResult:
     """Re-run merchant/category rules over ALL existing transactions — e.g.
     after creating rules, or after an update improved the built-in rules.
     A field the user corrected manually is never changed."""
-    from app.normalization.category import CARD_ACCOUNT_EXCLUDED, categorize
-    from app.normalization.merchant import normalize_merchant
-    from app.normalization.review import compute_review_status
-    from app.services.duplicate_preview_service import load_rules
-
     merchant_rules, category_rules = load_rules(session)
     card_account_ids = set(session.exec(select(Account.id).where(Account.account_type == AccountType.CREDIT_CARD)).all())
     corrected = set(session.exec(select(UserCorrection.transaction_id, UserCorrection.field)).all())
@@ -447,8 +307,6 @@ def reapply_rules(session: Session) -> ReapplyResult:
     rows = session.exec(
         select(Transaction, RawTransaction).join(RawTransaction, RawTransaction.id == Transaction.raw_transaction_id)
     ).all()
-    from app.services.category_memory import category_memory
-
     memory = category_memory(session)
     merchants_changed = categories_changed = 0
     for tx, raw in rows:
@@ -476,8 +334,6 @@ def reapply_rules(session: Session) -> ReapplyResult:
         session.add(tx)
     session.commit()
     # the rules don't know a card's issuer: its unlinked bills are sorted again
-    from app.services.transfer_marking import sort_card_bill_payees
-
     sort_card_bill_payees(session)
     return ReapplyResult(len(rows), merchants_changed, categories_changed)
 
@@ -495,10 +351,6 @@ def apply_rule_updates(session: Session) -> None:
     from starting."""
     import hashlib
     import logging
-
-    from app.config import settings
-    from app.normalization.category import DEFAULT_CATEGORY_RULES
-    from app.normalization.merchant import DEFAULT_MERCHANT_RULES
 
     logger = logging.getLogger("finance")
     version = hashlib.sha256(repr((DEFAULT_CATEGORY_RULES, DEFAULT_MERCHANT_RULES, NORMALIZATION_VERSION)).encode()).hexdigest()[:16]

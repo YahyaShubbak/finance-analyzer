@@ -5,7 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.importers.parsing_utils import MAX_AMOUNT_MINOR
-from app.schemas.account import _validate_currency
+from app.schemas.account import validate_currency
 
 
 class BudgetUpsert(BaseModel):
@@ -15,7 +15,7 @@ class BudgetUpsert(BaseModel):
     @field_validator("currency")
     @classmethod
     def _currency(cls, v: str) -> str:
-        return _validate_currency(v)
+        return validate_currency(v)
 
 
 class BudgetRead(BaseModel):

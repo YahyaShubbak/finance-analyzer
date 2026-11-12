@@ -31,12 +31,10 @@ from app.importers.parsing_utils import (
 )
 from app.importers.pdf_layouts import LAYOUT_REGISTRY
 from app.importers.pdf_layouts.base import booked_amount_minor
+from app.importers.pdf_layouts.lines import group_lines
 from app.importers.pdf_layouts.patterns import BALANCE_LINE_RE, may_be_missed_booking, reference_date
 from app.importers.pdf_layouts.points import extract_points
-
-#: Words whose vertical centers differ by less than this fraction of the
-#: word height are on the same printed line.
-_LINE_TOLERANCE = 0.5
+from app.importers.pdf_layouts.template import parse_with_template
 
 #: Below this confidence, no layout parser is trusted to have identified
 #: the document correctly — we refuse to guess.
@@ -121,8 +119,6 @@ class PDFImporter(BaseImporter):
 
         template = self.options.pdf_template if self.options else None
         if template:
-            from app.importers.pdf_layouts.template import parse_with_template
-
             result, layout_name = parse_with_template(template, full_text, pages), "user_template"
         elif not recognized:
             return ParsedImport(
@@ -337,27 +333,10 @@ def _signed_by_column(word: tuple, columns: tuple[float, float] | None) -> str:
     return f"+{text}" if to_in < to_out else f"-{text}"
 
 
-def _group_lines(words: list[tuple]) -> list[list[tuple]]:
-    """The page's printed lines as word groups (left to right, top to bottom)."""
-    # words: (x0, y0, x1, y1, text, block, line, word)
-    words = sorted(words, key=lambda w: ((w[1] + w[3]) / 2, w[0]))
-    lines: list[list[tuple]] = []
-    current_center = None
-    for word in words:
-        center = (word[1] + word[3]) / 2
-        height = max(word[3] - word[1], 1.0)
-        if current_center is None or abs(center - current_center) > height * _LINE_TOLERANCE:
-            lines.append([word])
-            current_center = center
-        else:
-            lines[-1].append(word)
-    return [sorted(line, key=lambda w: w[0]) for line in lines]
-
-
 def _lines_from_words(words: list[tuple], columns: tuple[float, float] | None = None) -> str:
     if not words:
         return ""
-    return "\n".join(" ".join(_signed_by_column(w, columns) for w in line) for line in _group_lines(words))
+    return "\n".join(" ".join(_signed_by_column(w, columns) for w in line) for line in group_lines(words))
 
 
 def line_geometry(pages: list[list[tuple]]) -> list[dict | None]:
@@ -370,7 +349,7 @@ def line_geometry(pages: list[list[tuple]]) -> list[dict | None]:
         if not words:
             boxes.append(None)
             continue
-        for line in _group_lines(words):
+        for line in group_lines(words):
             boxes.append({
                 "page": page_no,
                 "x0": round(min(w[0] for w in line), 1), "y0": round(min(w[1] for w in line), 1),

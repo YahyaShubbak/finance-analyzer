@@ -4,7 +4,8 @@ import pytest
 from sqlmodel import select
 
 from app.db.models import ImportRecord, RawTransaction, Transaction
-from app.services.import_service import ImportServiceError, commit_parsed_import, parse_file
+from app.services.import_reading import ImportServiceError, parse_file
+from app.services.import_service import commit_parsed_import
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

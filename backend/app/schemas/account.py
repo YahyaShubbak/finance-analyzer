@@ -28,7 +28,7 @@ def normalize_iban(value: str | None) -> str | None:
     return iban
 
 
-def _validate_currency(value: str | None) -> str | None:
+def validate_currency(value: str | None) -> str | None:
     if value is None:
         return None
     code = value.strip().upper()
@@ -59,7 +59,7 @@ class AccountCreate(BaseModel):
     @field_validator("currency")
     @classmethod
     def _currency(cls, v: str) -> str:
-        return _validate_currency(v)
+        return validate_currency(v)
 
     @field_validator("iban")
     @classmethod
@@ -85,7 +85,7 @@ class AccountUpdate(BaseModel):
     @field_validator("currency")
     @classmethod
     def _currency(cls, v: str | None) -> str | None:
-        return _validate_currency(v)
+        return validate_currency(v)
 
     @field_validator("iban")
     @classmethod

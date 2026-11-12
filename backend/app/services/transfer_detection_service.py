@@ -41,10 +41,17 @@ from app.db.models import (
     RawTransaction,
     Transaction,
     TransactionType,
-    UserCorrection,
 )
+from app.iban import IBAN_RE, valid_iban
 from app.normalization.transfers import DEFAULT_MAX_DAY_GAP, TransferCandidate, find_transfer_pairs
-from app.services.transfer_marking import corrected_fields, release_from_transfer, settle_as_transfer
+from app.services.duplicate_preview_service import load_rules
+from app.services.transfer_marking import (
+    corrected_fields,
+    manually_corrected_type_ids,
+    natural_type,
+    release_from_transfer,
+    settle_as_transfer,
+)
 
 
 @dataclass
@@ -55,22 +62,10 @@ class TransferDetectionResult:
     transactions_reverted_to_ordinary: int  # only nonzero for full_rescan
 
 
-def natural_type(amount_minor: int) -> TransactionType:
-    return TransactionType.INCOME if amount_minor > 0 else TransactionType.EXPENSE
-
-
-def manually_corrected_type_ids(session: Session) -> set[int]:
-    return set(
-        session.exec(select(UserCorrection.transaction_id).where(UserCorrection.field == "transaction_type")).all()
-    )
-
-
 def _counterparty_ibans(session: Session, tx_ids: list[int], own_ibans: set[str] | None = None) -> dict[int, str]:
     """The counterparty IBAN of each transaction: from its own column, or —
     when the statement prints it only in the booking text (e.g. comdirect)
     — an IBAN of one of the user's own accounts named there."""
-    from app.services.account_recognition import _IBAN_RE, _valid_iban
-
     result: dict[int, str] = {}
     if not tx_ids:
         return result
@@ -90,7 +85,7 @@ def _counterparty_ibans(session: Session, tx_ids: list[int], own_ibans: set[str]
         iban = extra.get("_counterparty_iban") if isinstance(extra, dict) else None
         if not iban and own_ibans:
             text = " ".join(filter(None, [description, extra.get("_details") if isinstance(extra, dict) else None]))
-            named = {v for m in _IBAN_RE.finditer(text) if (v := _valid_iban(m.group(0)))} & own_ibans
+            named = {v for m in IBAN_RE.finditer(text) if (v := valid_iban(m.group(0)))} & own_ibans
             iban = next(iter(named)) if len(named) == 1 else None
         if iban:
             result[tx_id] = iban
@@ -123,8 +118,6 @@ def run_transfer_detection(
     corrected = corrected_fields(session)
     reverted = 0
     if full_rescan:
-        from app.services.duplicate_preview_service import load_rules
-
         _merchant_rules, category_rules = load_rules(session)
         for t in in_scope:
             if t.is_transfer and t.transfer_pair_id is not None:
@@ -215,23 +208,3 @@ def _statementless_card_payments(
             session.add(tx)
         result.append(tx)
     return result
-
-
-def unpair_transfer(session: Session, tx: Transaction) -> None:
-    """Revert the partner of an auto-detected transfer pair when one half
-    is corrected manually or deleted, so no half-transfer is left behind.
-    The partner itself is not manually corrected, so a later re-scan may
-    pair it again with a better match."""
-    if tx.transfer_pair_id is None:
-        return
-    partner = session.get(Transaction, tx.transfer_pair_id)
-    tx.transfer_pair_id = None
-    if partner is not None and partner.transfer_pair_id == tx.id:
-        partner.transfer_pair_id = None
-        account = session.get(Account, partner.account_id)
-        if not (account and account.account_type == AccountType.CREDIT_CARD and partner.amount_minor > 0):
-            # (a payment onto a card stays a transfer, just unpaired)
-            partner.is_transfer = False
-            partner.transaction_type = natural_type(partner.amount_minor)
-            release_from_transfer(session, partner, corrected_fields(session, [partner.id]))
-        session.add(partner)

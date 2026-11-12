@@ -3,23 +3,20 @@
     IMPORT -> RAW DATA -> NORMALIZATION -> DATABASE
 
 Nothing is committed to `transactions`/`raw_transactions` until
-`commit_parsed_import` is called explicitly — `parse_file` alone only
-produces a preview.
+`commit_parsed_import` is called explicitly — reading a file
+(app.services.import_reading.parse_file) alone only produces a preview.
 """
 from __future__ import annotations
 
 import json
 import logging
-import re
 from dataclasses import dataclass
 from datetime import date, timedelta
-from pathlib import Path
 
 from sqlmodel import Session, select
 
 from app.db.models import (
     Account,
-    AccountType,
     CreditCardStatement,
     DocumentType,
     ImportRecord,
@@ -30,21 +27,24 @@ from app.db.models import (
     UserCorrection,
 )
 from app.i18n import format_date, tr
-from app.importers.base import ParsedImport, ParseOptions
-from app.importers.csv_importer import CSVImporter
-from app.importers.pdf_importer import PDFImporter
-from app.importers.xlsx_importer import XLSXImporter
+from app.importers.base import ParsedImport
 from app.normalization.category import UNSORTED_CATEGORIES
 from app.normalization.review import compute_review_status
+from app.normalization.transfers import IBAN_MATCH_MAX_DAY_GAP
+from app.reconciliation.engine import (
+    derive_statements_from_exports,
+    link_pending_payments,
+    reconcile_statement,
+    retire_derived_statements,
+)
 from app.services.duplicate_preview_service import classify_import_rows
+from app.services.import_reading import ImportServiceError, document_account_mismatch
 from app.services.location_service import refresh_locations
 from app.services.points_service import store_points
+from app.services.transfer_detection_service import detect_and_mark_transfers
+from app.services.transfer_marking import sort_card_bill_payees
 
 logger = logging.getLogger("finance")
-
-
-class ImportServiceError(Exception):
-    pass
 
 
 def find_existing_import_by_checksum(session: Session, checksum: str) -> ImportRecord | None:
@@ -53,35 +53,6 @@ def find_existing_import_by_checksum(session: Session, checksum: str) -> ImportR
         ImportRecord.status == ImportStatus.IMPORTED,
     )
     return session.exec(stmt).first()
-
-
-def build_importer_for(path: Path, original_filename: str | None = None, options: ParseOptions | None = None):
-    suffix = path.suffix.lower()
-    if suffix == ".csv":
-        return CSVImporter(path, original_filename, options)
-    if suffix == ".pdf":
-        return PDFImporter(path, original_filename, options)
-    if suffix == ".xlsx":
-        return XLSXImporter(path, original_filename, options)
-    raise ImportServiceError(tr("No importer available for file type: {suffix}", suffix=suffix))
-
-
-def parse_file(path: Path, original_filename: str | None = None, options: ParseOptions | None = None) -> ParsedImport:
-    """Produce a preview without touching the database.
-
-    A reader that stumbles over an unusual file (anything it doesn't report
-    itself as an issue of the preview) raises ImportServiceError: the user
-    is told the file could not be read, the cause goes to the log."""
-    importer = build_importer_for(path, original_filename, options)
-    if not importer.can_handle():
-        raise ImportServiceError(tr("Importer cannot handle file: {path}", path=path))
-    try:
-        return importer.parse()
-    except Exception as exc:  # noqa: BLE001 — whatever a reader didn't foresee
-        logger.exception("Could not read %s", original_filename or path.name)
-        raise ImportServiceError(tr(
-            "This file could not be read: the reader ran into a problem it doesn't know ({error}). "
-            "Nothing was imported.", error=type(exc).__name__)) from exc
 
 
 def statement_already_imported(session: Session, parsed: ParsedImport, account: Account) -> str | None:
@@ -100,56 +71,6 @@ def statement_already_imported(session: Session, parsed: ParsedImport, account: 
         return None
     record = session.get(ImportRecord, same.import_id)
     return tr("This statement is already imported (from {file}).", file=record.filename if record else "?")
-
-
-def document_account_mismatch(parsed: ParsedImport, account: Account) -> str | None:
-    """A credit-card statement on a bank account would get every sign wrong
-    (card statements list purchases as positive numbers) and create a
-    statement on the wrong kind of account, so it is refused."""
-    if parsed.document_type == DocumentType.CREDIT_CARD_STATEMENT and account.account_type != AccountType.CREDIT_CARD:
-        return tr("This file looks like a credit-card statement, but '{account}' is not a credit-card "
-                  "account. Choose the credit-card account (or create one) for this file.", account=account.name)
-    return None
-
-
-def document_account_warning(parsed: ParsedImport, account: Account) -> str | None:
-    """A bank-statement PDF on a credit-card account is often the wrong file
-    — but card accounts with an IBAN get exactly such statements, and the
-    signs are read correctly either way. So it is a warning to confirm, not
-    a refusal."""
-    if parsed.document_type == DocumentType.BANK_STATEMENT and account.account_type == AccountType.CREDIT_CARD \
-            and parsed.detected_layout and parsed.detected_layout.startswith("generic_bank_statement"):
-        return tr("This PDF looks like an account statement, but '{account}' is a credit-card account. "
-                  "That is fine for a card account with its own IBAN — otherwise choose the bank account.",
-                  account=account.name)
-    return None
-
-
-def purchases_listed_as_positive(parsed: ParsedImport, account: Account) -> bool:
-    """Card exports disagree on signs: many list purchases as positive
-    numbers (the issuer's view). In this app a purchase is negative, so a
-    card spreadsheet that is mostly positive was exported the other way
-    round — otherwise every purchase would be imported as a refund."""
-    if account.account_type != AccountType.CREDIT_CARD or not parsed.available_columns:
-        return False
-    amounts = [t.parsed_amount_minor for t in parsed.transactions if t.parsed_amount_minor]
-    # The clearest sign: how the payment onto the card ("Zahlung erhalten, besten Dank", a booking
-    # of type "Einzahlung") is shown — as money out, the file is the other way round; as money in,
-    # it already is the app's way (even in a month with more payments than purchases).
-    payments = [t.parsed_amount_minor for t in parsed.transactions if t.parsed_amount_minor and _PAYMENT_RECEIVED_RE.search(
-        " ".join(filter(None, [t.original_description, (t.extra_fields or {}).get("_booking_text")])))]
-    if any(a < 0 for a in payments):
-        return True
-    if payments:
-        return False
-    return len(amounts) >= 3 and sum(1 for a in amounts if a > 0) / len(amounts) >= 0.6
-
-
-_PAYMENT_RECEIVED_RE = re.compile(
-    r"zahlung[\w/ .-]{0,30}erhalten|payment[\w/ .-]{0,20}received|thank you for your payment|besten dank|"
-    r"ihre zahlung|\beinzahlung\b",
-    re.IGNORECASE,
-)
 
 
 @dataclass
@@ -414,15 +335,6 @@ def run_post_import_matching(
     the statement's settlement before generic transfer detection could
     pair it with something else), then transfer detection — both limited
     to the dates this import touched."""
-    from app.normalization.transfers import IBAN_MATCH_MAX_DAY_GAP
-    from app.reconciliation.engine import (
-        derive_statements_from_exports,
-        link_pending_payments,
-        reconcile_statement,
-        retire_derived_statements,
-    )
-    from app.services.transfer_detection_service import detect_and_mark_transfers
-
     if statement is not None:
         retire_derived_statements(session, statement)
         reconcile_statement(session, statement.id, auto_match=True)
@@ -434,6 +346,4 @@ def run_post_import_matching(
         gap = timedelta(days=IBAN_MATCH_MAX_DAY_GAP)  # the widest pairing window
         window = (import_record.period_start - gap, import_record.period_end + gap)
     detect_and_mark_transfers(session, date_window=window)
-    from app.services.transfer_marking import sort_card_bill_payees
-
     sort_card_bill_payees(session)

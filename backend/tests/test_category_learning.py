@@ -9,7 +9,7 @@ import pytest
 
 from app.db.models import CategoryRule
 from app.normalization.category import categorize
-from app.services.rule_service import derive_category_pattern
+from app.services.rule_patterns import derive_category_pattern
 
 
 @pytest.mark.parametrize(("text", "expected"), [

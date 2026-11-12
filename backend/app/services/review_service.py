@@ -15,7 +15,8 @@ from app.db.chunks import chunked
 from app.db.models import CategoryRule, RawTransaction, Transaction, UserCorrection, utcnow
 from app.services.category_suggestion import UnsortedSuggestions
 from app.services.chains import chain_index, payee_name
-from app.services.rule_service import category_rule_source, learn_category
+from app.services.rule_patterns import category_rule_source
+from app.services.rule_service import learn_category
 
 # key of a booking whose text names no payee: a group of its own
 _SINGLE = "tx:"

@@ -105,7 +105,7 @@ class ForgetRuleResponse(BaseModel):
 
 class ReviewGroupRead(BaseModel):
     """Transactions to review that a learned category would cover together
-    (the same payee, see rule_service.derive_category_pattern)."""
+    (the same payee, see rule_patterns.derive_category_pattern)."""
     key: str
     label: str
     learnable: bool  # a rule can be learned for them (False: a single booking without a usable payee)
