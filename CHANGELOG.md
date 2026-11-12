@@ -66,6 +66,12 @@ start — back up your data before updating).
 - Long files are stored faster (a 5,000-row export in about 3.6 s instead
   of 5.2 s), and a PDF statement with many lines ending in two amounts is
   read in a fraction of the time.
+- Faster with many bookings (measured with 30,000): assigning a category
+  that is learned takes about 0.1 s instead of 1.2 s, a page of the review
+  queue 0.1 s instead of 0.6 s, and the work after each import no longer
+  grows with the number of card statements waiting for their payment.
+- Of many files dropped at once, two are uploaded and read at a time; the
+  others wait for their turn.
 
 ### Added
 - Before the database schema is upgraded on start-up, a copy of the

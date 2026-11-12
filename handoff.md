@@ -8,19 +8,26 @@ Tests und die Doku im Repo sind Englisch.
 
 Ein Architektur-Audit des Repos (Version 0.8.0) hat 15 größere Befunde
 (Nr. 1–15) und eine Tabelle kleiner „Quick Wins“ ergeben. Erledigt und
-getestet sind die Befunde 1–6, 12 und großteils 14 sowie ein Teil der Quick Wins (Abschnitt
-„Quick Wins“). Offen sind die Befunde 7–11, 13, 15, der Rest von 14 und der Rest der Quick Wins.
+getestet sind die Befunde 1–9, 12 und großteils 14 sowie ein Teil der Quick Wins (Abschnitt
+„Quick Wins“). Offen sind die Befunde 10, 11, 13, 15, Reste von 7, 8 und 14 und der Rest der Quick Wins.
 
 Der Nutzer committet selbst. Die Befunde 1–6 stehen in Commit `68a370d`
 ("Harden imports, restores, and schema upgrades"); der Stand davor war
 `f0a3d0f`. Die neun erledigten Quick Wins sind ebenfalls committet (bis
-`7b5b058`), Befund 12 in `899e8b4`. Befund 14 lag am 2026-11-12 noch
-uncommittet im Arbeitsverzeichnis (Commit-Message im Chat des Nutzers):
-`frontend/src/pages/CreditCards.tsx`, `Budgets.tsx`, `Accounts.tsx`,
-`loadErrors.test.tsx`, `frontend/src/components/imports/ImportHistory.tsx`,
-`CHANGELOG.md`, `handoff.md`. Vor neuer Arbeit mit `git status` prüfen, ob das
-inzwischen committet ist — wenn nicht, den Nutzer darauf hinweisen und diese
-Dateien nicht anfassen.
+`7b5b058`), Befund 12 in `899e8b4`, Befund 14 und die kleinen Frontend-Punkte
+danach. Die Befunde 7–9 lagen am 2026-11-12 noch uncommittet im
+Arbeitsverzeichnis (Commit-Messages im Chat des Nutzers): im Backend
+`app/db/session.py`, `app/reconciliation/engine.py`, `app/api/routes/imports.py`,
+`app/services/` (`backup_service`, `category_memory`, `category_suggestion`,
+`chains`, `duplicate_preview_service`, `import_service`, `rule_service`) und die
+Tests `test_remembered.py`, `test_category_learning.py`,
+`test_duplicate_preview.py`, `test_import_workflow_fixes.py`,
+`test_reconciliation.py`, `test_rule_creation.py`; im Frontend
+`components/imports/ImportFileCard.tsx` (+ Test), `hooks/useImports.ts`,
+`i18n/de.ts`, `i18n/en.ts`, `pages/Imports.tsx`, `state/importQueue.ts`
+(+ Test); dazu `CHANGELOG.md` und `handoff.md`. Vor neuer Arbeit mit
+`git status` prüfen, ob das inzwischen committet ist — wenn nicht, den Nutzer
+darauf hinweisen und diese Dateien nicht anfassen.
 
 ## Arbeitsweise, die der Nutzer erwartet
 
@@ -43,7 +50,7 @@ Backend (in `backend/`, venv per `uv sync --locked`):
 
 ```
 uv run --locked ruff check app tests
-uv run --locked pytest -q -p no:cacheprovider          # ca. 2,5 min, zuletzt 795 bestanden
+uv run --locked pytest -q -p no:cacheprovider          # ca. 2,5 min, zuletzt 813 bestanden
 FINANCE_DATA_DIR=<leerer Temp-Ordner> uv run --locked alembic upgrade head
 FINANCE_DATA_DIR=<derselbe>           uv run --locked alembic check
 ```
@@ -112,52 +119,78 @@ gleichem Betrag wird weiterhin automatisch verknüpft. Eine strengere Regel
 („nur was wie eine Kartenabrechnung aussieht“) würde das Verknüpfen für jeden
 Herausgeber abschalten, dessen Abbuchungstext keine Regel kennt.
 
-## Offen: Befunde 7–11 und 13–15 (12 ist erledigt, siehe dort)
+## Befunde 7–15: Stand (7–9 und 12 erledigt, 14 großteils; offen 10, 11, 13, 15)
 
 Zeilennummern stammen vom Audit-Stand und können sich verschoben haben; die
 Funktionsnamen sind verlässlich.
 
-### 7. Nacharbeit pro Import skaliert mit dem Gesamtbestand
-- Wo: `run_post_import_matching` (`services/import_service.py`),
-  `link_pending_payments` und `derive_statements_from_exports`
-  (`reconciliation/engine.py`), `retype_card_payments` und
-  `sort_card_bill_payees` (`services/transfer_marking.py`), Aufruf von
-  `retype_card_payments` in `commit_import` (`api/routes/imports.py`).
-- Problem: Nach jedem Commit wird jede offene Abrechnung neu berechnet und
-  committet (auch ohne Treffer), jeder Karten-Export einzeln abgefragt, alle
-  Karten-Eingänge und `chain_index` über alle Buchungen geladen. Ein
-  Sammelimport von N Dateien ist quadratisch.
-- Fix: In `link_pending_payments` zuerst `find_automatic_match` aufrufen und
-  nur bei Treffer `reconcile_statement`. Die globalen Schritte auf Konten und
-  Datumsfenster des Imports begrenzen. Frontend: Upload-Queue mit 1–2
-  gleichzeitigen Uploads (`state/importQueue.ts`, `ImportFileCard.tsx`
-  startet den Upload beim Mount), und `invalidateTransactionDependentQueries`
-  nicht nach jedem einzelnen Commit den ganzen Cache invalidieren lassen.
-- Vorsicht: `reconcile_statement` legt für eine neue Abrechnung auch die
-  `Reconciliation`-Zeile an; die darf nicht entfallen.
+### Messung zu 7–9
 
-### 8. Review-Queue und Kategorie-Lernen: Vollscans pro Klick
-- Wo: `chain_index` (`services/chains.py`), `review_groups`
-  (`services/review_service.py`), `recategorize_matching`,
-  `list_learned_category_rules`, `reapply_rules` (`services/rule_service.py`),
-  `CategorySuggester.__init__` (`services/category_suggestion.py`),
-  `CategoryMemory` (`services/category_memory.py`).
-- Fix: Generationszähler per SQLAlchemy-`after_commit`-Event in
-  `db/session.py`; `chain_index`, `CategorySuggester`, `CategoryMemory` darauf
-  cachen. `derive_category_pattern` mit `lru_cache`. In
-  `recategorize_matching` einfache (nicht-Regex-)Muster per SQL vorfiltern
-  (die SQL-Funktionen `fold`/`fold_plain` gibt es schon).
+Künstlicher Bestand mit 30.000 Buchungen, 36 Kartenabrechnungen, 72 Importen
+(Skript nicht im Repo; es baut die Daten per ORM und ruft die Service-Funktionen
+direkt auf). Vorher → nachher:
 
-### 9. Eine PDF-Vorschau liest die Datei fünf- bis siebenmal
-- Wo: `file_signature` (`services/account_recognition.py`) wird in
-  `_review_reasons`, `_iban_of_another_account`, `_recognized_preview` und
-  `commit_import` (`api/routes/imports.py`) jeweils neu berechnet (je zwei
-  `pymupdf.open` plus Volltext); dazu bis zu drei Parse-Durchläufe.
-  `classify_import_rows` (`services/duplicate_preview_service.py`) lädt bei
-  jeder Vorschau alle Buchungen des Kontos.
-- Fix: Signatur einmal pro Request berechnen und durchreichen; vorhandene
-  Buchungen auf `period_start − 3 Tage … period_end + 3 Tage` begrenzen
-  (`CROSS_FILE_DATE_WINDOW_DAYS`).
+| Pfad | vorher | nachher |
+|---|---|---|
+| Kategorie zuweisen mit Lernen (`learn_category`) | 1,2 s | 0,11–0,14 s |
+| Review-Queue, eine Seite (`review_groups`) | 0,6 s | 0,12 s (0,4 s beim ersten Aufruf nach einer Datenänderung) |
+| Vorschau: Zeilen klassifizieren (`classify_import_rows`, 100 Zeilen) | 0,54 s | 0,23 s |
+| Zahlungen verknüpfen nach jedem Import (`link_pending_payments`) | 0,86 s | 0,03–0,06 s |
+| Kartenrechnungs-Zahler sortieren (`sort_card_bill_payees`) | 0,30 s | 0,006 s, wenn sich keine Zahlertexte geändert haben |
+| `derive_statements_from_exports`, `retype_card_payments` | 2 ms, 7 ms | unverändert |
+
+### 7. Nacharbeit pro Import skaliert mit dem Gesamtbestand — erledigt
+- Umgesetzt: `link_pending_payments` (`reconciliation/engine.py`) holt
+  „bearbeitet“, „hat Zahlung“ und die Beträge der freien Bankabbuchungen in je
+  einer Abfrage; eine Abrechnung, deren Betrag keine freie Abbuchung hat, wird
+  gar nicht mehr geprüft, und eine ohne Treffer nicht mehr neu berechnet und
+  committet. Eine Abrechnung ohne gespeicherte `Reconciliation` bekommt
+  weiterhin eine. Im Frontend laufen höchstens zwei Uploads gleichzeitig
+  (`uploadSlot` in `state/importQueue.ts`, Karte zeigt „Wartet, bis sie dran
+  ist…“), der Commit wartet nicht mehr auf das Neuladen aller Listen
+  (`hooks/useImports.ts`), und das doppelte `history.refetch()` ist weg
+  (die Prop `onDone` der Karte gibt es nicht mehr).
+- Bewusst nicht umgesetzt, weil gemessen unerheblich:
+  `derive_statements_from_exports` und `retype_card_payments` auf das
+  Datumsfenster des Imports begrenzen. Beide skalieren mit der Zahl der
+  Karten-Exporte bzw. der Karten-Eingänge, nicht mit dem Bestand. Wer es doch
+  macht: `derive…` sortiert erst **nach** sich neue „Card bills“ ein
+  (`sort_card_bill_payees`), ein Fenster dürfte die also nicht verpassen.
+- Offen: Commits in Dateireihenfolge; nach jedem Commit wird weiterhin der
+  ganze Query-Cache invalidiert (nur nicht mehr abgewartet).
+
+### 8. Review-Queue und Kategorie-Lernen: Vollscans pro Klick — erledigt
+- Umgesetzt: `remembered(session, name, build)` in `db/session.py` merkt sich
+  Werte, die aus dem ganzen Bestand errechnet werden, bis etwas committet wird
+  (Zähler über SQLAlchemy-Events). Eine Session mit eigenen, noch nicht
+  committeten Änderungen bekommt immer einen frischen Wert, der nicht behalten
+  wird. Darüber laufen `chain_index` (mit `payees_only=True`: überlebt
+  Commits, die weder Buchungen anlegen/löschen noch `merchant` /
+  `normalized_description` ändern), `category_memory()` und der
+  `CategorySuggester`. `derive_category_pattern` hat einen `lru_cache`.
+  `recategorize_matching` und `_rename_matching` (`rule_service.py`) laden per
+  `_could_contain` nur noch Buchungen, in denen das Muster vorkommen kann
+  (SQL-Funktion `fold`, Obermenge; die exakte Prüfung bleibt in Python).
+- Regeln für jede weitere Nutzung von `remembered`: den zurückgegebenen Wert
+  nie verändern; nach rohen SQL-Schreibzugriffen an der Session vorbei
+  `note_data_changed()` aufrufen (macht der Restore).
+- `rule_service.py` importiert `app.db.session` auf Modulebene, damit `fold`
+  für jede danach geöffnete Verbindung registriert ist — eine Engine, deren
+  Verbindung **vor** diesem Import geöffnet wurde, kennt `fold` nicht
+  (Fehler „no such function: fold“).
+- Offen: `list_learned_category_rules` rechnet weiter Regeln × Buchungen
+  (0,1 s bei 30.000 Buchungen); `reapply_rules` lädt bewusst alles.
+
+### 9. Eine PDF-Vorschau liest die Datei fünf- bis siebenmal — erledigt
+- Umgesetzt: `_signature` (`api/routes/imports.py`) berechnet die
+  Datei-Signatur einmal pro Parse-Ergebnis statt bis zu dreimal;
+  `classify_import_rows` vergleicht nur noch mit Buchungen im Datumsbereich der
+  Datei ± 3 Tage; ein automatischer Import klassifiziert seine Zeilen einmal
+  statt zweimal (`classified`-Parameter von `commit_parsed_import`).
+- Bleibt so: bis zu drei Parse-Durchläufe pro Vorschau (erster Versuch, mit
+  den Optionen des erkannten Dateityps, mit umgekehrten Vorzeichen) und der
+  erneute Parse beim Commit — jeder liest mit anderen Optionen bzw. ist
+  Absicht („Commit liest dieselben Bytes noch einmal“).
 
 ### 10. Relationale Verknüpfungen stecken in JSON-Blobs
 - Wo: `_duplicate_of` und `_kept_by_user` in
