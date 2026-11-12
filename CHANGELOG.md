@@ -54,6 +54,10 @@ start — back up your data before updating).
   that loading failed, and offers to try again.
 - A remembered dashboard period this version doesn't know made the start
   page fail on every load. It falls back to "This month".
+- The backups and learned rules in Settings showed nothing when they could
+  not be loaded; they now say so.
+- The transactions list stayed on a page that no longer existed when the
+  list got shorter ("Page 3 of 2" over an empty table).
 
 ### Changed
 - The transactions search filters once the typing pauses, not on every

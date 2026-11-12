@@ -213,10 +213,10 @@ Funktionsnamen sind verlässlich.
   und `components/imports/ImportHistory.tsx` zeigen `ErrorState` mit
   „Erneut versuchen“, wenn die Abfrage fehlschlägt und keine (alten) Daten da
   sind (`isError && !data`). Test: `pages/loadErrors.test.tsx`.
+- Ebenfalls erledigt: `components/settings/BackupSection.tsx` und
+  `LearnedRulesSection.tsx` (am 2026-11-12 noch uncommittet).
 - Offen: `pages/Overview.tsx` (monatliche Reihe, Kategorien, Konten zeigen bei
-  einem Fehler „nicht genug Daten“) sowie
-  `components/settings/BackupSection.tsx` und `LearnedRulesSection.tsx`
-  (rendern bei einem Fehler nichts). Gleiches Muster anwenden.
+  einem Fehler „nicht genug Daten“). Gleiches Muster anwenden.
 - Falle beim Testen: `beforeEach(() => mock.mockReset())` ohne geschweifte
   Klammern gibt die Mock-Funktion zurück; Vitest ruft sie als Aufräum-Funktion
   auf und der Test scheitert an deren Rückgabewert.
@@ -259,9 +259,9 @@ Status wird hier fortgeschrieben.
   Preset-Name fällt auf "This month" zurück statt die Startseite abstürzen zu
   lassen (`state/dashboardPeriod.test.ts`). Am 2026-11-12 noch uncommittet,
   zusammen mit `CHANGELOG.md` und `handoff.md`.
-- `pages/Transactions.tsx`, `components/reports/MonthTransactions.tsx`: die
-  Seite wird nicht begrenzt, wenn die Liste schrumpft ("Seite 3 von 2").
-  `BreakdownTransactions.tsx` und `ReviewQueue.tsx` machen es schon richtig.
+- **Erledigt für `pages/Transactions.tsx`:** die Seite wird begrenzt, wenn die
+  Liste schrumpft (Test in `pages/Transactions.test.tsx`; am 2026-11-12 noch
+  uncommittet). Offen: dasselbe in `components/reports/MonthTransactions.tsx`.
 - `components/charts/IncomeExpenseChart.tsx`: `Number(null) === 0` — ein
   Klick neben einen Balken wählt den ersten Monat. Fix:
   `if (state?.activeIndex == null) return;` (Verhalten von Recharts nicht
