@@ -450,7 +450,7 @@ def commit_import(payload: ImportCommitRequest, session: Session = Depends(get_s
         # The original document is stored before the database commit, so a
         # committed import can never point at a missing file.
         settings.ensure_directories()
-        stored_name = f"{payload.staging_id[:12]}_{import_staging.sanitize_filename(original_filename)}"
+        stored_name = import_staging.stored_document_name(payload.staging_id, original_filename)
         final_path = settings.imports_dir / stored_name
         try:
             shutil.copy2(staged_path, final_path)

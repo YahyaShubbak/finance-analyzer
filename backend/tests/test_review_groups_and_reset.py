@@ -88,11 +88,58 @@ def test_reset_deletes_everything_but_the_backups(client):
 
 
 def test_reset_can_delete_the_backups_too(client):
+    import zipfile
+
     from app.config import settings
 
-    (settings.backups_dir / "old.zip").write_bytes(b"x")
+    _import_csv(client, ROWS)
+    made = client.post("/api/backup/create").json()["filename"]
+    by_hand = settings.backups_dir / "from-my-old-laptop.zip"  # a backup copied here, as Settings lists it
+    with zipfile.ZipFile(by_hand, "w") as archive:
+        archive.writestr("finance.db", b"")
+        archive.writestr("manifest.json", "{}")
+    before_upgrade = settings.backups_dir / "pre-upgrade-b7d3e9a41c52-20261111-120000.db"
+    before_upgrade.write_bytes(b"a copy of the database")
+
     assert client.post("/api/system/reset", json={"confirm": "RESET", "delete_backups": True}).status_code == 200
     assert not any(settings.backups_dir.iterdir())
+    assert made and client.get("/api/backup").json() == []
+
+
+def test_reset_deletes_only_what_is_the_apps(client, monkeypatch):
+    """The imports and backups folders can be any folder (FINANCE_IMPORTS_DIR,
+    FINANCE_BACKUPS_DIR) — the user's archive of statements, a shared drive.
+    What the app did not put there stays, also with "delete the backups too"."""
+    from app.config import settings
+
+    _import_csv(client, ROWS)
+    [stored] = list(settings.imports_dir.iterdir())
+    left_by_a_failed_import = settings.imports_dir / "0123456789ab_statement.pdf"
+    left_by_a_failed_import.write_bytes(b"%PDF a statement")
+    own_archive = [settings.imports_dir / "Kontoauszug 2025-03.pdf", settings.imports_dir / "2024" / "Dezember.pdf"]
+    own_archive[1].parent.mkdir()
+    for path in own_archive:
+        path.write_bytes(b"%PDF mine")
+    client.post("/api/backup/create")
+    not_backups = [settings.backups_dir / "holiday-photos.zip", settings.backups_dir / "notes.txt"]
+    not_backups[0].write_bytes(b"PK not a backup of this app")
+    not_backups[1].write_text("my notes")
+    export_elsewhere = settings.exports_dir / "report.xlsx"  # the fixture's exports folder is outside the data folder
+    export_elsewhere.write_bytes(b"mine too")
+
+    assert client.post("/api/system/reset", json={"confirm": "RESET", "delete_backups": True}).status_code == 200
+
+    assert not stored.exists() and not left_by_a_failed_import.exists()
+    assert all(path.read_bytes() == b"%PDF mine" for path in own_archive)
+    assert sorted(p.name for p in settings.backups_dir.iterdir()) == ["holiday-photos.zip", "notes.txt"]
+    assert export_elsewhere.exists()
+
+    # the app's own exports folder (inside the data folder) is emptied as before
+    monkeypatch.setattr(settings, "exports_dir", settings.data_dir / "exports")
+    settings.exports_dir.mkdir()
+    (settings.exports_dir / "old-export.csv").write_text("x")
+    assert client.post("/api/system/reset", json={"confirm": "RESET"}).status_code == 200
+    assert not any(settings.exports_dir.iterdir())
 
 
 def test_transactions_can_be_sorted_by_amount_account_and_type(client):

@@ -471,3 +471,73 @@ def test_leftover_folder_of_an_interrupted_restore_without_replaced_files_is_rem
     purge_leftover_restore_dirs()
 
     assert not leftover.exists()
+
+
+# ---------------------------------------------------------------------------
+# 10. Only the app's own files are replaced or cleaned away
+# ---------------------------------------------------------------------------
+
+def test_restore_keeps_other_files_in_the_imports_folder(client, tmp_path):
+    """FINANCE_IMPORTS_DIR may be a folder the user keeps other files in (an
+    archive of statements). A restore replaces the imports' stored originals
+    — not whatever else lies there."""
+    from app.config import settings
+
+    backup_bytes, backed_up, before = _backup_then_change(client, tmp_path)
+    own = {"Kontoauszug 2025-03.pdf": b"%PDF mine", "2024/Dezember.pdf": b"%PDF mine too"}
+    for name, content in own.items():
+        path = settings.imports_dir / name
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(content)
+    left_by_a_failed_import = settings.imports_dir / "0123456789ab_statement.pdf"
+    left_by_a_failed_import.write_bytes(b"%PDF a statement")
+
+    r = _restore(client, backup_bytes)
+    assert r.status_code == 200, r.text
+
+    documents = _current_state(client)["documents"]
+    assert {name: documents[name] for name in own} == own  # still there, unchanged
+    # besides them: exactly the backup's documents — not the replaced state's, nor the app's leftovers
+    assert {name: content for name, content in documents.items() if name not in own} == backed_up["documents"]
+    assert documents != before["documents"]
+    assert not left_by_a_failed_import.exists()
+    assert list(settings.data_dir.glob(".restore-*")) == []
+
+
+def test_start_up_cleaning_leaves_the_users_own_folders_alone(client):
+    """Only working folders with the app's own prefix are cleaned away — not
+    any folder whose name starts with "tmp" and that holds a database copy."""
+    from app.config import settings
+    from app.services.backup_service import purge_leftover_restore_dirs
+
+    own_copy = settings.data_dir / "tmp-copy-before-experiment"
+    own_copy.mkdir()
+    (own_copy / "finance.db").write_bytes(b"my own copy")
+    interrupted = settings.data_dir / ".finance-tmp-abc123"
+    interrupted.mkdir()
+    (interrupted / "finance.db").write_bytes(b"left by an interrupted backup")
+
+    purge_leftover_restore_dirs()
+
+    assert (own_copy / "finance.db").read_bytes() == b"my own copy"
+    assert not interrupted.exists()
+
+
+def test_a_backup_works_in_a_folder_with_the_apps_prefix(client, tmp_path, monkeypatch):
+    import tempfile
+
+    from app.config import settings
+
+    made = []
+    real = tempfile.TemporaryDirectory
+
+    def recording(*args, **kwargs):
+        made.append(kwargs.get("prefix"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(tempfile, "TemporaryDirectory", recording)
+    _build_rich_scenario(client, tmp_path)
+    assert client.post("/api/backup/create").status_code == 200
+
+    assert made and all(prefix == ".finance-tmp-" for prefix in made)
+    assert not list(settings.data_dir.glob(".finance-tmp-*"))  # removed when done

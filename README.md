@@ -169,7 +169,7 @@ Environment variables with the same names take precedence.
 | `FINANCE_OPEN_BROWSER` | `true` to open the browser on start |
 | `FINANCE_HOST` | interface to bind; default `127.0.0.1`. **Changing this exposes your data to the network — there is no login.** |
 | `FINANCE_ALLOWED_HOSTS` | extra host names to accept (comma-separated), only needed together with `FINANCE_HOST` |
-| `FINANCE_IMPORTS_DIR`, `FINANCE_BACKUPS_DIR`, `FINANCE_EXPORTS_DIR` | override single sub-folders |
+| `FINANCE_IMPORTS_DIR`, `FINANCE_BACKUPS_DIR`, `FINANCE_EXPORTS_DIR` | override single sub-folders. If such a folder also holds files of your own, a restore or "Reset everything" leaves them alone: only what the app put there is replaced or deleted. (A backup still packs every file of the imports folder.) |
 
 ## Importing statements
 

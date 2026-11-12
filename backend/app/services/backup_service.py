@@ -68,6 +68,8 @@ _IMPORTS_PREFIX = "imports/"
 _COPY_CHUNK = 1024 * 1024
 #: inside the staging folder of a restore: the database and documents it replaced
 _PREVIOUS = "previous"
+#: the working folders of a backup or a validation in the data folder (each holds a copy of the database)
+_TMP_PREFIX = ".finance-tmp-"
 
 logger = logging.getLogger("finance")
 
@@ -154,7 +156,7 @@ def create_backup_zip(filename_prefix: str = "finance-backup") -> Path:
     zip_path = settings.backups_dir / f"{filename_prefix}-{timestamp}-{unique_suffix}.zip"
     partial_path = zip_path.with_suffix(".zip.partial")
 
-    with tempfile.TemporaryDirectory(dir=settings.data_dir) as tmp_dir:
+    with tempfile.TemporaryDirectory(dir=settings.data_dir, prefix=_TMP_PREFIX) as tmp_dir:
         tmp_db = Path(tmp_dir) / "finance.db"
         _snapshot_sqlite_db(settings.database_path, tmp_db)
 
@@ -274,7 +276,7 @@ def validate_backup_zip(zip_path: Path) -> dict:
             if not isinstance(manifest, dict):
                 raise BackupValidationError(tr("This backup's manifest is corrupt: not a JSON object."))
 
-            with tempfile.TemporaryDirectory(dir=settings.data_dir) as tmp_dir:
+            with tempfile.TemporaryDirectory(dir=settings.data_dir, prefix=_TMP_PREFIX) as tmp_dir:
                 tmp_db = Path(tmp_dir) / "finance.db"
                 with zf.open("finance.db") as src, open(tmp_db, "wb") as dst:
                     shutil.copyfileobj(src, dst, _COPY_CHUNK)
@@ -431,6 +433,52 @@ def _swap_in(staged_db: Path, staged_imports: Path, staging_root: Path) -> None:
         raise _SwapError(exc, put_back) from exc
 
 
+def _stored_document_names(database_path: Path) -> set[str]:
+    """The stored originals of the imports in this database, as names
+    inside the imports folder. Empty when it can't be read (then only files
+    named the way the app names them count as the app's)."""
+    from app.services.import_staging import stored_relative_name
+
+    if not database_path.exists():
+        return set()
+    try:
+        conn = sqlite3.connect(str(database_path))
+        try:
+            return {stored_relative_name(row[0]) for row in conn.execute("SELECT stored_path FROM imports")}
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return set()
+
+
+def _keep_other_files(replaced: Path, imports: Path, app_documents: set[str]) -> bool:
+    """The imports folder may be one the user also keeps other files in
+    (FINANCE_IMPORTS_DIR pointing at an archive of statements, say). The
+    restore replaced the folder as a whole; whatever in the replaced one was
+    not an import's stored original is moved back, so only the app's own
+    documents go. Returns False if a file could not be moved — it then
+    stays in `replaced`."""
+    from app.services.import_staging import is_app_document
+
+    if not replaced.is_dir():
+        return True
+    complete = True
+    for path in sorted(replaced.rglob("*")):
+        relative = path.relative_to(replaced)
+        if not path.is_file() or is_app_document(relative, app_documents):
+            continue
+        target = imports / relative
+        if target.exists():
+            continue  # the backup holds a file of that name: the same document
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(path, target)
+        except OSError:
+            complete = False
+            logger.exception("Could not move %s back to the imports folder; it stays in %s", relative, replaced)
+    return complete
+
+
 def restore_from_backup(zip_path: Path, confirm: bool) -> RestoreResult:
     """Restores the database and imported source documents from a backup
     ZIP. Requires explicit confirmation. Current data is untouched unless
@@ -456,6 +504,7 @@ def restore_from_backup(zip_path: Path, confirm: bool) -> RestoreResult:
             safety_backup_path = None
             if settings.database_path.exists():
                 safety_backup_path = create_backup_zip(filename_prefix="pre-restore-safety")
+            replaced_documents = _stored_document_names(settings.database_path)
 
             # Close pooled connections to the current database before
             # replacing the file out from under them.
@@ -474,6 +523,9 @@ def restore_from_backup(zip_path: Path, confirm: bool) -> RestoreResult:
                 raise BackupError(failed + " " + tr(
                     "Your data could not be put back completely. Stop the app; what was there before is in "
                     "the folder {folder}.", folder=staging_root / _PREVIOUS) + hint) from exc
+            # The restore is done. What else lay in the imports folder goes back there.
+            if not _keep_other_files(staging_root / _PREVIOUS / "imports", settings.imports_dir, replaced_documents):
+                keep_staging = True  # named in the log, and again on every start-up until it is dealt with
         finally:
             if not keep_staging:
                 shutil.rmtree(staging_root, ignore_errors=True)
@@ -525,6 +577,8 @@ def purge_leftover_restore_dirs() -> None:
             )
             continue
         shutil.rmtree(path, ignore_errors=True)
-    for path in settings.data_dir.glob("tmp*"):
-        if path.is_dir() and (path / "finance.db").exists():
+    # (only folders with the app's own prefix: a "tmp..." folder holding a
+    # finance.db may be a copy the user put there)
+    for path in settings.data_dir.glob(f"{_TMP_PREFIX}*"):
+        if path.is_dir():
             shutil.rmtree(path, ignore_errors=True)

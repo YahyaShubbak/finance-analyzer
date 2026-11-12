@@ -121,15 +121,38 @@ def purge_stale_staging_files() -> int:
     return removed
 
 
+_STORED_NAME_RE = re.compile(r"^[0-9a-f]{12}_.")
+
+
+def stored_document_name(staging_id: str, original_filename: str) -> str:
+    """The name an imported statement's copy gets in the imports folder."""
+    _check_id(staging_id)
+    return f"{staging_id[:12]}_{sanitize_filename(original_filename)}"
+
+
+def stored_relative_name(stored_path: str) -> str:
+    """ImportRecord.stored_path as a name inside the imports folder. Older
+    versions stored "imports/<name>" relative to the repository; newer ones
+    just "<name>"."""
+    name = (stored_path or "").replace("\\", "/")
+    return name[len("imports/"):] if name.startswith("imports/") else name
+
+
+def is_app_document(relative: Path, stored_paths: set[str]) -> bool:
+    """Is this file in the imports folder one of the app's — an import's
+    stored original (`stored_paths`: stored_relative_name of every import),
+    or a file named as the app names them (left by an import that failed)?
+    The folder may be one the user also keeps other files in
+    (FINANCE_IMPORTS_DIR): those are never the app's to delete."""
+    return relative.as_posix() in stored_paths or (len(relative.parts) == 1 and bool(_STORED_NAME_RE.match(relative.name)))
+
+
 def stored_import_path(stored_path: str) -> Path | None:
     """Absolute path of an imported source document, or None if the stored
-    value would point outside the imports directory. Older versions stored
-    "imports/<name>" relative to the repository; newer ones just "<name>"."""
+    value would point outside the imports directory."""
     if not stored_path:
         return None
-    name = stored_path.replace("\\", "/")
-    if name.startswith("imports/"):
-        name = name[len("imports/"):]
+    name = stored_relative_name(stored_path)
     root = settings.imports_dir.resolve()
     candidate = (root / name).resolve()
     return candidate if candidate.is_relative_to(root) and candidate != root else None

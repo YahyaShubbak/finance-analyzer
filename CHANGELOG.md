@@ -43,6 +43,12 @@ start — back up your data before updating).
   account.
 - "Reset everything" left the remembered filters and the dashboard's period
   and account in place.
+- With the imports or backups folder set to a folder that also holds other
+  files (`FINANCE_IMPORTS_DIR`, `FINANCE_BACKUPS_DIR`), a restore and "Reset
+  everything" deleted those too. Only the app's own files are replaced or
+  deleted now: the imports' stored originals, and backups. On start-up,
+  only working folders with the app's own name are cleaned away — no longer
+  any folder starting with "tmp" that holds a `finance.db`.
 
 ### Changed
 - The transactions search filters once the typing pauses, not on every

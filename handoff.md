@@ -8,28 +8,19 @@ Tests und die Doku im Repo sind Englisch.
 
 Ein Architektur-Audit des Repos (Version 0.8.0) hat 15 größere Befunde
 (Nr. 1–15) und eine Tabelle kleiner „Quick Wins“ ergeben. Erledigt und
-getestet sind die Befunde 1–6 sowie ein Teil der Quick Wins (Abschnitt
-„Quick Wins“). Offen sind die Befunde 7–15 und der Rest der Quick Wins.
+getestet sind die Befunde 1–6 und 12 sowie ein Teil der Quick Wins (Abschnitt
+„Quick Wins“). Offen sind die Befunde 7–11 und 13–15 und der Rest der Quick Wins.
 
 Der Nutzer committet selbst. Die Befunde 1–6 stehen in Commit `68a370d`
 ("Harden imports, restores, and schema upgrades"); der Stand davor war
-`f0a3d0f`. Die neun erledigten Quick Wins lagen am 2026-11-12 noch
-uncommittet im Arbeitsverzeichnis (je eine Commit-Message steht im Chat des
-Nutzers). Vor neuer Arbeit mit `git status` / `git log` prüfen, ob sie
-inzwischen committet sind — wenn nicht, den Nutzer darauf hinweisen und
-keine dieser Dateien anfassen, sonst lassen sich die Commits nicht mehr
-trennen:
-
-- `backend/app/__main__.py`, `backend/tests/test_instance_lock.py`
-- `backend/app/importers/tabular.py`, `backend/tests/test_xlsx_importer.py`
-- `backend/tests/test_migrations.py`
-- `backend/app/services/import_service.py`, `backend/tests/test_import_service.py`
-- `backend/app/importers/pdf_layouts/generic_bank.py`, `backend/tests/test_statement_layouts.py`
-- `frontend/src/components/transactions/TransactionFilterBar.tsx` (+ `.test.tsx`), `frontend/src/test/app.integration.test.tsx`
-- `frontend/src/pages/Overview.tsx` (+ `.test.tsx`)
-- `frontend/src/pages/Transactions.tsx` (+ `.test.tsx`)
-- `frontend/src/state/filterStore.ts`, `frontend/src/components/settings/ResetSection.tsx` (+ `.test.tsx`)
-- `CHANGELOG.md`, `handoff.md`
+`f0a3d0f`. Die neun erledigten Quick Wins sind ebenfalls committet (bis
+`7b5b058`). Befund 12 lag am 2026-11-12 noch uncommittet im Arbeitsverzeichnis
+(Commit-Message im Chat des Nutzers): `backend/app/services/reset_service.py`,
+`backup_service.py`, `import_staging.py`, `backend/app/api/routes/imports.py`,
+`backend/tests/test_backup_restore.py`, `test_review_groups_and_reset.py`,
+`README.md`, `CHANGELOG.md`, `handoff.md`. Vor neuer Arbeit mit `git status`
+prüfen, ob das inzwischen committet ist — wenn nicht, den Nutzer darauf
+hinweisen und diese Dateien nicht anfassen.
 
 ## Arbeitsweise, die der Nutzer erwartet
 
@@ -52,7 +43,7 @@ Backend (in `backend/`, venv per `uv sync --locked`):
 
 ```
 uv run --locked ruff check app tests
-uv run --locked pytest -q -p no:cacheprovider          # ca. 2,5 min, zuletzt 791 bestanden
+uv run --locked pytest -q -p no:cacheprovider          # ca. 2,5 min, zuletzt 795 bestanden
 FINANCE_DATA_DIR=<leerer Temp-Ordner> uv run --locked alembic upgrade head
 FINANCE_DATA_DIR=<derselbe>           uv run --locked alembic check
 ```
@@ -121,7 +112,7 @@ gleichem Betrag wird weiterhin automatisch verknüpft. Eine strengere Regel
 („nur was wie eine Kartenabrechnung aussieht“) würde das Verknüpfen für jeden
 Herausgeber abschalten, dessen Abbuchungstext keine Regel kennt.
 
-## Offen: Befunde 7–15 (in dieser Reihenfolge sinnvoll)
+## Offen: Befunde 7–11 und 13–15 (12 ist erledigt, siehe dort)
 
 Zeilennummern stammen vom Audit-Stand und können sich verschoben haben; die
 Funktionsnamen sind verlässlich.
@@ -185,15 +176,24 @@ Funktionsnamen sind verlässlich.
 - Fix: drei Blattmodule herauslösen (`app/iban.py`, Read-Builder unter
   `schemas/`, PDF-Zeilengruppierung nach `importers/pdf_layouts/`).
 
-### 12. Restore und Reset behandeln `imports_dir` als app-exklusiv
-- Wo: `_swap_in` (`backup_service.py`), `reset_everything`
-  (`reset_service.py`), `purge_leftover_restore_dirs` (löscht jedes `tmp*`
-  mit `finance.db` im Datenordner).
-- Problem: Zeigt `FINANCE_IMPORTS_DIR` auf einen Ordner mit eigenen Dateien,
-  verschwinden sie bei Restore/Reset.
-- Fix: nur Dateien anfassen, die in `ImportRecord.stored_path` stehen;
-  `TemporaryDirectory(prefix=".finance-tmp-")` und nur dieses Präfix
-  aufräumen.
+### 12. Restore und Reset behandeln `imports_dir` als app-exklusiv — erledigt
+- Umgesetzt: `is_app_document` (`services/import_staging.py`) sagt, was im
+  Imports-Ordner der App gehört: die in `ImportRecord.stored_path` genannten
+  Dateien und Dateien mit dem App-Namensmuster (`<12 Hex>_<name>`, auch von
+  fehlgeschlagenen Importen). Reset löscht nur diese (`reset_service.py`);
+  Restore tauscht den Ordner weiterhin als Ganzes und schiebt danach alles
+  Fremde zurück (`_keep_other_files` in `backup_service.py`). Beim Löschen
+  der Backups gehen nur App-Dateien (`finance-backup-*`, `pre-restore-safety-*`,
+  `pre-upgrade-*`) und ZIPs mit `finance.db` + `manifest.json`. Der
+  Exports-Ordner wird nur geleert, wenn er im Datenordner liegt. Arbeitsordner
+  heißen jetzt `.finance-tmp-*`; nur die räumt der Start weg.
+- Bewusst nicht umgesetzt: `create_backup_zip` packt weiterhin **jede** Datei
+  des Imports-Ordners ins Backup (`rglob`), also auch fremde. Wer das ändert,
+  muss entscheiden, ob Altlasten (nicht referenzierte App-Dateien) ins Backup
+  gehören. Alte `tmp*`-Reste früherer Versionen werden nicht mehr gelöscht.
+- Kann ein fremdes File nach dem Restore nicht zurückgeschoben werden, bleibt
+  es in `.restore-*/previous/imports`; der Ordner wird dann nicht gelöscht
+  und beim Start im Log genannt. Der Restore selbst gilt als gelungen.
 
 ### 13. Import-Karte verliert ihr Ergebnis und versteckt Fehler
 - Wo: `frontend/src/components/imports/ImportFileCard.tsx`,

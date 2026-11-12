@@ -1,19 +1,29 @@
 """Start over: every booking, import, account, category, rule, budget and
 point is deleted, with the stored originals and exports. Backups stay
-unless asked — they are the way back."""
+unless asked — they are the way back.
+
+Only the app's own files are deleted. The imports and backups folders can
+be set to any folder (FINANCE_IMPORTS_DIR, FINANCE_BACKUPS_DIR) — one the
+user also keeps other things in, say an archive of statements or a shared
+drive: what the app did not put there is not the app's to delete.
+"""
 from __future__ import annotations
 
 import logging
 import shutil
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlmodel import Session, SQLModel, delete
+from sqlmodel import Session, SQLModel, delete, select
 
 from app.config import settings
+from app.db.models import ImportRecord
 
 logger = logging.getLogger("finance")
 
+# What the app names the files it writes to the backups folder.
+_BACKUP_PREFIXES = ("finance-backup-", "pre-restore-safety-", "pre-upgrade-")
 
 
 @dataclass
@@ -22,24 +32,67 @@ class ResetResult:
     files_deleted: int
 
 
+def _delete(path: Path) -> int:
+    try:
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+        return 1
+    except OSError:
+        logger.warning("Could not delete %s during the reset", path.name)
+        return 0
+
+
 def _empty_folder(folder: Path) -> int:
-    """Delete what is inside `folder` (the folder itself stays)."""
+    """Delete what is inside `folder` (the folder itself stays) — for
+    folders that are the app's alone."""
     if not folder.exists():
         return 0
-    count = 0
-    for child in folder.iterdir():
-        try:
-            if child.is_dir() and not child.is_symlink():
-                shutil.rmtree(child)
-            else:
-                child.unlink()
-            count += 1
-        except OSError:
-            logger.warning("Could not delete %s during the reset", child.name)
-    return count
+    return sum(_delete(child) for child in folder.iterdir())
+
+
+def _delete_stored_documents(stored_paths: set[str]) -> int:
+    """The imports' stored originals (and copies left by imports that
+    failed); other files in the folder stay."""
+    from app.services.import_staging import is_app_document
+
+    folder = settings.imports_dir
+    if not folder.exists():
+        return 0
+    return sum(
+        _delete(path) for path in sorted(folder.rglob("*"))
+        if path.is_file() and is_app_document(path.relative_to(folder), stored_paths)
+    )
+
+
+def _is_backup(path: Path) -> bool:
+    """A file the app wrote to the backups folder, or a backup put there by
+    hand (as Settings lists it): a ZIP holding a database and a manifest."""
+    if path.name.startswith(_BACKUP_PREFIXES):
+        return True
+    if path.suffix.lower() != ".zip":
+        return False
+    try:
+        with zipfile.ZipFile(path) as archive:
+            return {"finance.db", "manifest.json"} <= set(archive.namelist())
+    except (zipfile.BadZipFile, OSError):
+        return False
+
+
+def _delete_backups() -> int:
+    folder = settings.backups_dir
+    if not folder.exists():
+        return 0
+    return sum(_delete(path) for path in sorted(folder.iterdir()) if path.is_file() and _is_backup(path))
 
 
 def reset_everything(session: Session, delete_backups: bool = False) -> ResetResult:
+    from app.services.import_staging import stored_relative_name
+
+    # (known only while the imports are still in the database)
+    stored_paths = {stored_relative_name(path) for path in session.exec(select(ImportRecord.stored_path)).all()}
+
     rows = 0
     for table in reversed(SQLModel.metadata.sorted_tables):  # dependents first
         rows += session.exec(delete(table)).rowcount or 0
@@ -52,9 +105,13 @@ def reset_everything(session: Session, delete_backups: bool = False) -> ResetRes
         connection.exec_driver_sql("VACUUM")
         connection.exec_driver_sql("PRAGMA wal_checkpoint(TRUNCATE)")
 
-    files = sum(_empty_folder(folder) for folder in (settings.imports_dir, settings.exports_dir, settings.staging_dir))
+    files = _delete_stored_documents(stored_paths) + _empty_folder(settings.staging_dir)
+    # The app writes no exports; the folder is emptied only where it is the
+    # app's own (inside the data folder), never one configured elsewhere.
+    if settings.exports_dir.resolve().is_relative_to(settings.data_dir.resolve()):
+        files += _empty_folder(settings.exports_dir)
     if delete_backups:
-        files += _empty_folder(settings.backups_dir)
+        files += _delete_backups()
     # start-up work a fresh database needs again
     from app.services.account_recognition import SIGNATURES_MARKER
     from app.services.points_service import POINTS_MARKER
