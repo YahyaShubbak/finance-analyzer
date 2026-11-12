@@ -261,7 +261,8 @@ Status wird hier fortgeschrieben.
   zusammen mit `CHANGELOG.md` und `handoff.md`.
 - **Erledigt für `pages/Transactions.tsx`:** die Seite wird begrenzt, wenn die
   Liste schrumpft (Test in `pages/Transactions.test.tsx`; am 2026-11-12 noch
-  uncommittet). Offen: dasselbe in `components/reports/MonthTransactions.tsx`.
+  uncommittet). Ebenso erledigt: `components/reports/MonthTransactions.tsx`
+  (`MonthTransactions.test.tsx`).
 - `components/charts/IncomeExpenseChart.tsx`: `Number(null) === 0` — ein
   Klick neben einen Balken wählt den ersten Monat. Fix:
   `if (state?.activeIndex == null) return;` (Verhalten von Recharts nicht
