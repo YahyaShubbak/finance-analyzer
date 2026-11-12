@@ -109,6 +109,25 @@ def _answers_as_this_app(url: str) -> bool:
         return False
 
 
+#: how long `--open` waits for the app to answer before giving up on opening the browser
+OPEN_BROWSER_TIMEOUT_SECONDS = 300.0
+
+
+def _open_browser_when_ready(url: str, timeout: float = OPEN_BROWSER_TIMEOUT_SECONDS, poll: float = 0.3) -> bool:
+    """Open the browser once the app answers. The port only listens after
+    start-up finished — upgrading the database, reading stored statements
+    again after an update — which can take much longer than a moment: opened
+    earlier, the browser shows "connection refused". Returns whether it
+    was opened."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _answers_as_this_app(url):
+            webbrowser.open(url)
+            return True
+        time.sleep(poll)
+    return False
+
+
 def _port_available(host: str, port: int) -> bool:
     family = socket.AF_INET6 if ":" in host else socket.AF_INET
     with socket.socket(family, socket.SOCK_STREAM) as sock:
@@ -172,6 +191,12 @@ def main(argv: list[str] | None = None) -> int:
                   file=sys.stderr)
             print(f"  Start this one on another port:  ./run.sh --port {args.port + 1}"
                   f"   (Windows: run.bat --port {args.port + 1})", file=sys.stderr)
+        elif _answers_as_this_app(url) and args.open:
+            # Started again to get to the app (the Start-menu shortcut, a
+            # second double-click): that is what happens — not an error.
+            print(f"The app is already running: opening {url}")
+            webbrowser.open(url)
+            return 0
         elif _answers_as_this_app(url):
             print(f"The app is already running: open {url}", file=sys.stderr)
             print("  (It may have been started without a window, e.g. from the file manager.)", file=sys.stderr)
@@ -217,7 +242,8 @@ def main(argv: list[str] | None = None) -> int:
     print(flush=True)
 
     if args.open:
-        threading.Timer(1.5, webbrowser.open, args=(url,)).start()
+        # (a daemon thread: it must not keep a failed start-up from ending)
+        threading.Thread(target=_open_browser_when_ready, args=(url,), daemon=True).start()
 
     import uvicorn
 

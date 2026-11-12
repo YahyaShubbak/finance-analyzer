@@ -32,6 +32,30 @@ def test_normal_xlsx_import_native_typed_cells(tmp_path):
     assert result.period_end == "2026-04-05"
 
 
+def test_rounding_noise_of_a_spreadsheet_number_is_not_part_of_the_amount(tmp_path):
+    """A sum or a formula's result is stored as the binary float it is:
+    0.1 + 0.2 arrives as 0.30000000000000004. That is 0.30 — while a number
+    with real sub-cent digits is still not an amount."""
+    noisy = 0.1 + 0.2
+    assert repr(noisy) == "0.30000000000000004"
+    path = write_xlsx(
+        tmp_path / "sums.xlsx",
+        ["Date", "Description", "Amount"],
+        [
+            [date(2026, 4, 1), "Three coffees", -noisy],
+            [date(2026, 4, 2), "Three tickets", 59.970000000000006],
+            [date(2026, 4, 3), "Refund", 123456789.12000002],
+            [date(2026, 4, 4), "A rate, not an amount", 12.345],
+        ],
+    )
+
+    result = XLSXImporter(path).parse()
+
+    assert [t.parsed_amount_minor for t in result.transactions] == [-30, 5997, 12345678912, None]
+    [issue] = [i for i in result.issues if i.row_index is not None]
+    assert issue.row_index == 3 and "more than two decimal places" in issue.message
+
+
 def test_german_decimal_and_date_text_formatting(tmp_path):
     # Some exports store German-formatted values as plain text rather than
     # native Excel number/date types.

@@ -31,6 +31,25 @@ start — back up your data before updating).
   staging folder. It is now reported as unreadable, with the cause in the
   log. An import that failed while being stored no longer leaves the copy
   of the statement in the imports folder.
+- `--open` opened the browser before the app was listening when the start
+  took longer (a database upgrade): "connection refused". It now waits for
+  the app. Starting the running app again with `--open` opens the browser
+  instead of ending with an error.
+- An amount in a spreadsheet that carries a float's rounding noise
+  (59.970000000000006) was refused as "more than two decimal places".
+- A remembered filter on one of your own categories was dropped on every
+  reload of the Transactions page.
+- The dashboard's forecast and recurring payments ignored the chosen
+  account.
+- "Reset everything" left the remembered filters and the dashboard's period
+  and account in place.
+
+### Changed
+- The transactions search filters once the typing pauses, not on every
+  keystroke.
+- Long files are stored faster (a 5,000-row export in about 3.6 s instead
+  of 5.2 s), and a PDF statement with many lines ending in two amounts is
+  read in a fraction of the time.
 
 ### Added
 - Before the database schema is upgraded on start-up, a copy of the

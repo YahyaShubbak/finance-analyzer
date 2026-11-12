@@ -48,6 +48,13 @@ function setFilters(update: Partial<PersistedFilters>) {
   listeners.forEach((l) => l(current));
 }
 
+/** Forget every filter — also the copy this module keeps while the app is
+ * open: removing the stored one alone is undone by the next change, which
+ * writes that copy back. */
+export function resetFilters() {
+  setFilters(DEFAULT_FILTERS);
+}
+
 export function useFilters(): [PersistedFilters, (update: Partial<PersistedFilters>) => void, () => void] {
   const [filters, setLocal] = useState(current);
 
@@ -59,7 +66,7 @@ export function useFilters(): [PersistedFilters, (update: Partial<PersistedFilte
   }, []);
 
   const update = useCallback((patch: Partial<PersistedFilters>) => setFilters(patch), []);
-  const reset = useCallback(() => setFilters(DEFAULT_FILTERS), []);
+  const reset = useCallback(() => resetFilters(), []);
 
   return [filters, update, reset];
 }

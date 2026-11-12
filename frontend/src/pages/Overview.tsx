@@ -48,8 +48,8 @@ export function Overview() {
   const categories = useCategoryBreakdown(query);
   const accounts = useAccountBreakdown(query);
   const transfers = useTransfersSummary(query);
-  const recurring = useRecurringSeries();
-  const forecast = useForecast(3);
+  const recurring = useRecurringSeries(query.account_id);
+  const forecast = useForecast(3, query.account_id);
 
   const [selected, setSelected] = useState<{ category: string; currency: string } | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<MonthlyPoint | null>(null);

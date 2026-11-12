@@ -3,10 +3,11 @@ import { Button, Card } from "../ui";
 import { useResetEverything } from "../../hooks/useSystem";
 import { useCreateBackup } from "../../hooks/useBackup";
 import { clearQueue } from "../../state/importQueue";
+import { resetFilters } from "../../state/filterStore";
 import { useI18n } from "../../i18n/useI18n";
 
-// what this browser remembers besides the language
-const STORED_PREFERENCES = ["finance.filters.v1", "finance.autoImport", "finance.learnCategories"];
+// what this browser remembers besides the language (the dashboard's period and account included)
+const STORED_PREFERENCES = ["finance.filters.v1", "finance.dashboard.v1", "finance.autoImport", "finance.learnCategories"];
 
 /** Start over: everything is deleted (backups only when asked). Typed
  * confirmation, and a backup offered first — this can't be undone. */
@@ -28,6 +29,7 @@ export function ResetSection() {
       return; // shown below
     }
     clearQueue();
+    resetFilters(); // the filters in use right now, not only their stored copy
     for (const key of STORED_PREFERENCES) {
       try {
         localStorage.removeItem(key);

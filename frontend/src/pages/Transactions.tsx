@@ -8,7 +8,7 @@ import { PageHeader } from "../components/ui";
 import { useTransactions } from "../hooks/useTransactions";
 import { useAccounts } from "../hooks/useAccounts";
 import { useFilters } from "../state/filterStore";
-import { useCategoryNames } from "../hooks/useCategories";
+import { useCategories, useCategoryNames } from "../hooks/useCategories";
 import { useI18n } from "../i18n/useI18n";
 import type { TransactionSort } from "../types";
 
@@ -22,17 +22,21 @@ export function Transactions() {
   const { data: accounts } = useAccounts();
   const assignment = useCategoryAssignment();
   const categories = useCategoryNames();
+  // (the names start as the built-in ones; the user's own arrive with this list)
+  const { data: loadedCategories } = useCategories();
   // a saved filter on an account or category that is archived or gone would filter silently
   useEffect(() => {
     const staleAccount = accounts && filters.accountId !== undefined && !accounts.some((a) => a.id === filters.accountId);
-    const staleCategory = categories.length > 0 && filters.category !== undefined && !categories.includes(filters.category);
+    // only once the user's own categories are known: before that, a filter on one of them looks stale
+    const staleCategory =
+      loadedCategories !== undefined && filters.category !== undefined && !categories.includes(filters.category);
     if (staleAccount || staleCategory) {
       updateFilters({
         ...(staleAccount ? { accountId: undefined } : {}),
         ...(staleCategory ? { category: undefined } : {}),
       });
     }
-  }, [accounts, categories, filters.accountId, filters.category, updateFilters]);
+  }, [accounts, categories, loadedCategories, filters.accountId, filters.category, updateFilters]);
 
   const [sort, setSort] = useState<TransactionSort>(DEFAULT_SORT);
   const query = useTransactions({

@@ -225,7 +225,10 @@ def parse_rows(rows: list[list[Any]], *, filename: str, checksum: str, options: 
 
     def amount_minor(raw: Any) -> int:
         if _is_number(raw):
-            value = Decimal(str(raw))
+            # A spreadsheet's number is a binary float: a sum or a formula's result arrives as
+            # 59.970000000000006. 15 significant digits is all a float holds for certain (and
+            # all a spreadsheet shows); what lies beyond is not part of the amount.
+            value = Decimal(f"{raw:.15g}") if isinstance(raw, float) else Decimal(str(raw))
             if value != value.quantize(Decimal("0.01")):
                 # Same rule as for text: sub-cent precision means a wrong
                 # column or a formula, never a bank amount.

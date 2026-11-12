@@ -1,7 +1,12 @@
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Account } from "../../types";
 import type { PersistedFilters } from "../../state/filterStore";
 import { categoryLabel } from "../../lib/categories";
 import { useI18n } from "../../i18n/useI18n";
+
+/** Search once the typing pauses (as the reports' transaction lists do) —
+ * not one request, each scanning every booking, per keystroke. */
+export const SEARCH_DELAY_MS = 300;
 
 export function TransactionFilterBar({
   filters,
@@ -17,6 +22,35 @@ export function TransactionFilterBar({
   categories: string[];
 }) {
   const { t } = useI18n();
+
+  // What is typed shows at once; the filter follows when the typing pauses.
+  const [typed, setTyped] = useState(filters.search ?? "");
+  const onChangeRef = useRef(onChange);
+  const pending = useRef<string | undefined>(undefined); // typed, not sent yet
+  useLayoutEffect(() => {
+    onChangeRef.current = onChange;
+    pending.current = typed === (filters.search ?? "") ? undefined : typed;
+  });
+  // the page is left before the pause: what was typed still counts (and is remembered)
+  useEffect(
+    () => () => {
+      if (pending.current !== undefined) onChangeRef.current({ search: pending.current || undefined });
+    },
+    []
+  );
+  // the filter changed elsewhere ("Reset", a stale filter cleared): show that
+  // (set while rendering, so the old text is never shown)
+  const [shownFor, setShownFor] = useState(filters.search);
+  if (filters.search !== shownFor) {
+    setShownFor(filters.search);
+    setTyped(filters.search ?? "");
+  }
+  useEffect(() => {
+    if (typed === (filters.search ?? "")) return;
+    const timer = setTimeout(() => onChangeRef.current({ search: typed || undefined }), SEARCH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [typed, filters.search]);
+
   return (
     <div className="flex flex-wrap items-center gap-2.5 px-5 py-3.5 border-b border-border bg-surface">
       <select
@@ -79,8 +113,8 @@ export function TransactionFilterBar({
         type="search"
         placeholder={t("tx.search")}
         className="text-sm border border-border-strong rounded-md px-2.5 py-1.5 bg-surface text-ink flex-1 min-w-[160px]"
-        value={filters.search ?? ""}
-        onChange={(e) => onChange({ search: e.target.value || undefined })}
+        value={typed}
+        onChange={(e) => setTyped(e.target.value)}
       />
 
       <button onClick={onReset} className="text-xs text-ink-muted hover:text-ink underline underline-offset-2">

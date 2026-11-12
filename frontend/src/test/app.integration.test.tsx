@@ -286,9 +286,12 @@ describe.skipIf(!API_BASE)("Real app against a real (throwaway) backend", () => 
 
     // Verify the actual persistence mechanism directly: the value must be
     // in localStorage itself, not just in in-memory component state — this
-    // is what a real page reload would read from.
-    const stored = JSON.parse(localStorage.getItem("finance.filters.v1") ?? "{}");
-    expect(stored.search).toBe(`PERSIST_${RUN_ID}`);
+    // is what a real page reload would read from. (The search is applied,
+    // and stored, once the typing pauses.)
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem("finance.filters.v1") ?? "{}");
+      expect(stored.search).toBe(`PERSIST_${RUN_ID}`);
+    });
 
     // Unmounting React and clearing the module registry, then re-importing
     // App fresh, is the closest jsdom equivalent to a real page reload —

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
@@ -186,6 +187,43 @@ def test_running_migrations_keeps_the_apps_loggers_working(tmp_path):
     loggers = [logging.getLogger(name) for name in ("uvicorn", "uvicorn.error", "uvicorn.access", "finance")]
     command.upgrade(_alembic_config(f"sqlite:///{tmp_path / 'log.db'}"), "head")
     assert [lg.disabled for lg in loggers] == [False] * 4
+
+
+# ---------------------------------------------------------------------------
+# A database without a version stamp is recognized at every revision
+# ---------------------------------------------------------------------------
+
+def _revisions_oldest_first() -> list[str]:
+    from alembic.script import ScriptDirectory
+
+    script = ScriptDirectory.from_config(_alembic_config("sqlite://"))
+    return [rev.revision for rev in reversed(list(script.walk_revisions()))]
+
+
+def test_the_migration_chain_is_what_this_test_expects():
+    revisions = _revisions_oldest_first()
+    assert revisions[0] == BASELINE_REVISION and len(revisions) == len(set(revisions)) >= 11
+
+
+@pytest.mark.parametrize("revision", _revisions_oldest_first())
+def test_a_database_without_version_stamp_is_recognized_at_every_revision(tmp_path, revision):
+    """Every migration needs its branch in _detect_unversioned_revision: a
+    database built from the models of that time (no alembic_version table)
+    stamped with an older revision would run the migration again ("duplicate
+    column"), stamped with a newer one would skip migrations it lacks. A
+    new migration without a branch fails here."""
+    import sqlite3
+
+    from app.db.migrate import _schema_revision
+
+    db_path = tmp_path / "unversioned.db"
+    command.upgrade(_alembic_config(f"sqlite:///{db_path}"), revision)
+    conn = sqlite3.connect(db_path)
+    conn.execute("DROP TABLE alembic_version")
+    conn.commit()
+    conn.close()
+
+    assert _schema_revision(db_path) == (revision, True)
 
 
 # ---------------------------------------------------------------------------

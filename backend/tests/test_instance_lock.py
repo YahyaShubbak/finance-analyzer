@@ -150,3 +150,69 @@ def test_the_app_does_not_start_on_a_just_emptied_legacy_folder(entry, monkeypat
     assert module.main(["--port", "8499", "--no-open"]) == 1
     assert not started
     assert "just moved" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# --open
+# ---------------------------------------------------------------------------
+
+def test_the_browser_is_opened_only_once_the_app_answers(monkeypatch):
+    """The port listens after start-up finished (a database upgrade can take
+    a while); opened on a timer, the browser showed "connection refused"."""
+    import webbrowser
+
+    import app.__main__ as module
+
+    answers = iter([False, False, True])
+    probed, opened = [], []
+    monkeypatch.setattr(module, "_answers_as_this_app", lambda url: probed.append(url) or next(answers))
+    monkeypatch.setattr(webbrowser, "open", opened.append)
+
+    assert module._open_browser_when_ready("http://127.0.0.1:8499", timeout=5, poll=0) is True
+    assert len(probed) == 3 and opened == ["http://127.0.0.1:8499"]
+
+
+def test_the_browser_is_not_opened_for_an_app_that_never_comes_up(monkeypatch):
+    import webbrowser
+
+    import app.__main__ as module
+
+    opened = []
+    monkeypatch.setattr(module, "_answers_as_this_app", lambda _url: False)
+    monkeypatch.setattr(webbrowser, "open", opened.append)
+
+    assert module._open_browser_when_ready("http://127.0.0.1:8499", timeout=0.05, poll=0.01) is False
+    assert opened == []
+
+
+def test_open_waits_for_the_app_instead_of_a_fixed_delay(entry, monkeypatch):
+    import threading
+
+    module, started = entry
+    asked, waiting = [], threading.Event()
+    monkeypatch.setattr(module, "_open_browser_when_ready", lambda url: (asked.append(url), waiting.set()))
+
+    assert module.main(["--port", "8499", "--open"]) == 0
+    assert started
+    assert waiting.wait(5) and asked == ["http://127.0.0.1:8499"]
+
+
+def test_starting_the_running_app_again_with_open_just_opens_the_browser(entry, monkeypatch, capsys):
+    """The Start-menu shortcut clicked a second time: the app is there, so
+    show it — not an error message in a window that waits for a key."""
+    import webbrowser
+
+    module, started = entry
+    opened = []
+    monkeypatch.setattr(module, "_port_available", lambda _host, _port: False)
+    monkeypatch.setattr(module, "_answers_as_this_app", lambda _url: True)
+    monkeypatch.setattr(module, "_running_instance", lambda _data_dir: {"pid": 1, "host": "127.0.0.1", "port": 8499})
+    monkeypatch.setattr(webbrowser, "open", opened.append)
+
+    assert module.main(["--port", "8499", "--open"]) == 0
+    assert opened == ["http://127.0.0.1:8499"] and not started
+
+    # without --open it stays what it was: a hint, and no second instance
+    assert module.main(["--port", "8499", "--no-open"]) == 1
+    assert opened == ["http://127.0.0.1:8499"] and not started
+    assert "already running" in capsys.readouterr().err
