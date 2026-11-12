@@ -13,6 +13,18 @@ start — back up your data before updating).
   number), or after a backup was restored. A card now only offers "Undo"
   while its import is in the list, restoring a backup clears the cards, and
   an import's number is never given to a later import (schema change).
+- An import that finished while another page was shown was lost on its
+  card: back on the imports page the card offered the file again, and
+  importing it a second time failed with "Preview not found". A card now
+  shows what became of its file whenever the page is opened — also why an
+  import failed — and never imports a file twice.
+- Why an import failed was written on the card behind the full-window
+  review, where nobody saw it. It is said in the review now.
+- Several files that wanted their review looked at opened them on top of
+  each other, and one Escape closed them all. One review is open at a time;
+  the next opens when it is closed.
+- A file removed from the page while it was still being uploaded stayed in
+  the app's staging folder for up to a day. It is discarded right away.
 - Running the installer again removed settings added to `finance.env` by
   hand (`FINANCE_HOST`, `FINANCE_IMPORTS_DIR`, `FINANCE_BACKUPS_DIR`, ...),
   so after an update the app looked for backups and originals in another
@@ -72,6 +84,7 @@ start — back up your data before updating).
   grows with the number of card statements waiting for their payment.
 - Of many files dropped at once, two are uploaded and read at a time; the
   others wait for their turn.
+- Dropped files go on being read while another page is shown.
 - Which booking a row stands for that was skipped as a duplicate (the same
   purchase in a card's statement and in its export) is now a checked
   reference in the database instead of a note inside the row's extra

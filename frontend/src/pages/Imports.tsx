@@ -2,15 +2,13 @@ import { useState } from "react";
 import { useI18n } from "../i18n/useI18n";
 import { PageHeader } from "../components/ui";
 import { DropZone } from "../components/imports/DropZone";
-import { ImportFileCard } from "../components/imports/ImportFileCard";
+import { ImportFileCards } from "../components/imports/ImportFileCards";
 import { ImportHistory } from "../components/imports/ImportHistory";
 import { loadAutoImportPreference, saveAutoImportPreference } from "../state/autoImportPreference";
-import { addFiles, removeFile, saveSnapshot, useImportQueue } from "../state/importQueue";
+import { addFiles } from "../state/importQueue";
 
 export function Imports() {
   const { t } = useI18n();
-  // kept outside the page: pending files survive a visit to another page
-  const queue = useImportQueue();
   const [autoImport, setAutoImportState] = useState(loadAutoImportPreference);
 
   function setAutoImport(value: boolean) {
@@ -35,20 +33,7 @@ export function Imports() {
           </label>
         </div>
 
-        {queue.length > 0 && (
-          <div className="space-y-3">
-            {queue.map((qf) => (
-              <ImportFileCard
-                key={qf.key}
-                file={qf.file}
-                autoImport={autoImport}
-                snapshot={qf.snapshot}
-                onSnapshot={(patch) => saveSnapshot(qf.key, patch)}
-                onRemove={() => removeFile(qf.key)}
-              />
-            ))}
-          </div>
-        )}
+        <ImportFileCards autoImport={autoImport} />
 
         <ImportHistory />
       </div>

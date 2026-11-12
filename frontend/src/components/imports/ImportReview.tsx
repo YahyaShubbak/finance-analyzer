@@ -35,6 +35,7 @@ function isPdfBox(location: ParsedTransactionPreview["location"]): location is P
 export function ImportReview({
   preview,
   importing,
+  error,
   canImport,
   onImport,
   onClose,
@@ -44,6 +45,8 @@ export function ImportReview({
 }: {
   preview: ImportPreview;
   importing: boolean;
+  /** why the import (or reading the file again) failed — said here: the review covers the card */
+  error?: string;
   canImport: boolean;
   onImport: (dontAskAgain: boolean) => void;
   onClose: () => void;
@@ -411,6 +414,11 @@ export function ImportReview({
 
         <div className="flex flex-wrap items-center justify-end gap-4 px-5 py-3 border-t border-border">
           <p className="mr-auto text-xs text-ink-muted max-w-xl">{t("review.howTo")}</p>
+          {error && (
+            <p role="alert" className="basis-full order-first rounded-md bg-danger-soft border border-danger/20 px-3 py-2 text-xs text-danger">
+              {error}
+            </p>
+          )}
           {canImport && preview.account_id !== null && (
             <label className="flex items-center gap-2 text-xs text-ink">
               <input type="checkbox" checked={dontAskAgain} onChange={(e) => setDontAskAgain(e.target.checked)} />
@@ -419,7 +427,7 @@ export function ImportReview({
           )}
           {preview.account_id === null && accountPicker}
           {canImport && (
-            <Button variant="primary" disabled={importing} onClick={() => onImport(dontAskAgain)}>
+            <Button variant="primary" disabled={importing || applying} onClick={() => onImport(dontAskAgain)}>
               {importing ? t("importCard.importing") : t("review.confirmImport")}
             </Button>
           )}

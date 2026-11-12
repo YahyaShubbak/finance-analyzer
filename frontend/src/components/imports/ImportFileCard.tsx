@@ -20,7 +20,6 @@ import { formatDate, formatMoney, formatSignedMoney } from "../../lib/format";
 import { isSameImport, noteLearned, uploadSlot, useLearnedVersion, type CardSnapshot } from "../../state/importQueue";
 import type {
   Account,
-  ImportCommitResult,
   ImportPreview,
   ParseOptions,
   PdfTemplate,
@@ -32,13 +31,38 @@ function defaultDecisionFor(status: string): RowDecisionValue {
   return status === "exact_duplicate" ? "skip" : "keep";
 }
 
-function initialDecisions(preview: ImportPreview): Record<number, RowDecisionValue> {
-  const initial: Record<number, RowDecisionValue> = {};
-  for (const row of preview.row_classifications) {
-    if (row.status !== "new") initial[row.source_row_index] = defaultDecisionFor(row.status);
-  }
-  return initial;
+/** What the user chose for the preview shown. A new preview (another
+ * account, other columns) starts over. */
+interface Choices {
+  for: ImportPreview | undefined;
+  decisions: Record<number, RowDecisionValue>;
+  warningsConfirmed: boolean;
+  showMapping: boolean;
 }
+
+function initialChoices(preview: ImportPreview | undefined): Choices {
+  const decisions: Record<number, RowDecisionValue> = {};
+  for (const row of preview?.row_classifications ?? []) {
+    if (row.status !== "new") decisions[row.source_row_index] = defaultDecisionFor(row.status);
+  }
+  return {
+    for: preview,
+    decisions,
+    warningsConfirmed: false,
+    showMapping: Boolean(preview && preview.ambiguous && preview.available_columns.length > 0),
+  };
+}
+
+/** The file is not imported (any more): back to choosing an account. */
+const NOT_IMPORTED: CardSnapshot = {
+  error: undefined,
+  commitError: undefined,
+  committed: undefined,
+  seenInHistory: false,
+  preview: undefined,
+  manual: true,
+  undone: true,
+};
 
 export function ImportFileCard({
   file,
@@ -46,38 +70,49 @@ export function ImportFileCard({
   snapshot,
   onSnapshot,
   onRemove,
+  reviewOpen,
+  reviewElsewhere,
+  onReview,
 }: {
   file: File;
   /** import right away when the account is recognized and the preview shows nothing to check */
   autoImport: boolean;
-  /** where the card was before the page was left (see state/importQueue) */
+  /** what the card has reached and is doing (see state/importQueue) */
   snapshot: CardSnapshot;
-  onSnapshot: (patch: CardSnapshot) => void;
+  /** false: the file is not in the queue any more */
+  onSnapshot: (patch: CardSnapshot) => boolean | void;
   onRemove: () => void;
+  /** this file's import review is open */
+  reviewOpen: boolean;
+  /** another file's is: this one waits for its turn */
+  reviewElsewhere: boolean;
+  onReview: (open: boolean) => void;
 }) {
   const { t, tn } = useI18n();
   const { data: accounts } = useAccounts();
 
-  const [p, setPreview] = useState<ImportPreview | undefined>(snapshot.preview);
-  const [committed, setCommitted] = useState<ImportCommitResult | undefined>(snapshot.committed);
-  const [seenInHistory, setSeenInHistory] = useState(Boolean(snapshot.seenInHistory));
-  const [showDetails, setShowDetails] = useState(false);
-  const [showRows, setShowRows] = useState(false);
-  const [showMapping, setShowMapping] = useState(false);
-  const [warningsConfirmed, setWarningsConfirmed] = useState(false);
-  const [decisions, setDecisions] = useState<Record<number, RowDecisionValue>>(
-    snapshot.preview ? initialDecisions(snapshot.preview) : {}
-  );
+  // Everything a request changes is kept with the file in the queue, not in
+  // this component: its answer also arrives when the page was left
+  // meanwhile, and the card shows it when the page is opened again.
+  const { preview: p, committed } = snapshot;
+  const seenInHistory = Boolean(snapshot.seenInHistory);
   // The user took over: chose or changed the account, or undid an import.
   // Nothing is then imported without their click.
-  const [manual, setManual] = useState(Boolean(snapshot.manual));
+  const manual = Boolean(snapshot.manual);
+  const undone = Boolean(snapshot.undone);
+  const formOptions = Boolean(snapshot.formOptions);
+  const waiting = snapshot.busy === "waiting";
+  const busy = snapshot.busy === "reading";
+  const importing = snapshot.busy === "importing";
+  const undoing = snapshot.busy === "undoing";
+
+  const [showDetails, setShowDetails] = useState(false);
+  const [showRows, setShowRows] = useState(false);
   const [pickAccount, setPickAccount] = useState(false);
-  const [undone, setUndone] = useState(Boolean(snapshot.undone));
-  const [formOptions, setFormOptions] = useState(Boolean(snapshot.formOptions));
-  const [autoRefused, setAutoRefused] = useState<string | null>(null);
-  const [autoImported, setAutoImported] = useState(Boolean(snapshot.autoImported));
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [reviewDismissed, setReviewDismissed] = useState(Boolean(snapshot.reviewDismissed));
+  const [chosen, setChosen] = useState<Choices>(() => initialChoices(p));
+  const choices = chosen.for === p ? chosen : initialChoices(p);
+  const { decisions, warningsConfirmed, showMapping } = choices;
+  const choose = (patch: Partial<Choices>) => setChosen({ ...choices, ...patch });
 
   const preview = usePreviewImport();
   const reparse = useReparseImport();
@@ -87,45 +122,52 @@ export function ImportFileCard({
   const removal = useRemoveImport();
   const history = useImportHistory();
   const started = useRef(false);
+  // (as snapshot.busy, but known at once: not only after the next render)
+  const sending = useRef(false);
 
-  // keep the card's progress when the page is left
-  useEffect(() => {
-    onSnapshot({ preview: p, committed, seenInHistory, autoImported, manual, undone, formOptions, reviewDismissed });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p, committed, seenInHistory, autoImported, manual, undone, formOptions, reviewDismissed]);
-
-  function applyPreview(data: ImportPreview) {
-    setPreview(data);
-    setDecisions(initialDecisions(data));
-    setWarningsConfirmed(false);
-    setShowMapping(data.ambiguous && data.available_columns.length > 0);
+  /** Sends one request of this card and keeps its outcome with the file:
+   * `done` / `failed` say what it changes. Resolves to whether it worked. */
+  function request<T>(
+    doing: NonNullable<CardSnapshot["busy"]>,
+    send: () => Promise<T>,
+    done: (result: T) => CardSnapshot,
+    failed: (message: string) => CardSnapshot = (error) => ({ error })
+  ): Promise<boolean> {
+    sending.current = true;
+    onSnapshot({ busy: doing, error: undefined, commitError: undefined });
+    return send().then(
+      (result) => {
+        sending.current = false;
+        onSnapshot({ busy: undefined, ...done(result) });
+        return true;
+      },
+      (error: Error) => {
+        sending.current = false;
+        onSnapshot({ busy: undefined, ...failed(error.message) });
+        return false;
+      }
+    );
   }
 
   // Read the file right away — when its turn comes: of many files dropped at
   // once, a few are uploaded and read at a time (state/importQueue). The
   // backend recognizes the file's account if it can.
-  const [waiting, setWaiting] = useState(() => !snapshot.preview && !snapshot.committed && !snapshot.undone);
-  const mounted = useRef(true);
   useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-  useEffect(() => {
-    if (started.current || snapshot.preview || snapshot.committed || snapshot.undone) return;
+    if (started.current || snapshot.preview || snapshot.committed || snapshot.undone || snapshot.busy) return;
     started.current = true;
+    onSnapshot({ busy: "waiting", error: undefined });
     void uploadSlot().then((release) => {
-      if (!mounted.current) return release(); // the page was left: its turn is asked for again when it is opened
-      setWaiting(false);
+      if (onSnapshot({ busy: "reading" }) === false) return release(); // removed while it waited
       preview
         .mutateAsync({ file })
-        .then((data) => {
-          onSnapshot({ preview: data }); // kept also when the page was left meanwhile: not uploaded again
-          applyPreview(data);
-        })
-        .catch(() => {}) // shown from preview.error
-        .finally(release);
+        .finally(release)
+        .then(
+          (data) => {
+            // removed while it was read: nobody is left to import it
+            if (onSnapshot({ busy: undefined, preview: data }) === false) discard.mutate(data.staging_id);
+          },
+          (error: Error) => void onSnapshot({ busy: undefined, error: error.message })
+        );
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -134,19 +176,23 @@ export function ImportFileCard({
   // A file nothing could be read from: no point asking for its account.
   const unreadable = p !== undefined && p.has_errors && p.transaction_count === 0;
 
+  /** Reads the uploaded file again: for another account, with other options. */
+  function readAgain(staged: ImportPreview, options: ParseOptions, targetAccountId: number | null) {
+    return request(
+      "reading",
+      () => reparse.mutateAsync({ stagingId: staged.staging_id, accountId: targetAccountId, options }),
+      (data) => ({ preview: data })
+    );
+  }
+
   function reparseWith(options: ParseOptions, targetAccountId = accountId) {
-    if (!p || !targetAccountId) return;
-    reparse.mutate({ stagingId: p.staging_id, accountId: targetAccountId, options }, { onSuccess: applyPreview });
+    if (p && targetAccountId) void readAgain(p, options, targetAccountId);
   }
 
   // The user taught the reader in the review: read the file again with it
   // (also before an account is chosen).
   function teach(template: PdfTemplate | null) {
-    if (!p) return;
-    reparse.mutate(
-      { stagingId: p.staging_id, accountId: p.account_id, options: { ...p.options, pdf_template: template } },
-      { onSuccess: applyPreview }
-    );
+    if (p) void readAgain(p, { ...p.options, pdf_template: template }, p.account_id);
   }
 
   // For another account the app decides anew about inverting the amounts —
@@ -158,59 +204,55 @@ export function ImportFileCard({
   // Not recognized, but there is only one account: that one (confirmed by the user's click).
   const onlyAccount = accounts?.length === 1 ? accounts[0].id : undefined;
   useEffect(() => {
-    if (p && p.account_id === null && !unreadable && onlyAccount !== undefined && !reparse.isPending && !manual) {
-      setManual(true);
+    if (p && p.account_id === null && !unreadable && onlyAccount !== undefined && !snapshot.busy && !manual) {
+      onSnapshot({ manual: true });
       reparseWith(optionsForAnotherAccount(p.options), onlyAccount);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p, onlyAccount]);
 
   function changeAccount(id: number) {
-    accountChosen.current = true;
-    setManual(true);
     setPickAccount(false);
+    onSnapshot({ manual: true, accountChosen: true });
     if (p && !committed) {
       // Duplicate detection depends on the account: re-classify the already
       // uploaded file instead of uploading it again.
       reparseWith(optionsForAnotherAccount(p.options), id);
     } else {
-      setUndone(false);
-      preview.mutate({ file, accountId: id }, { onSuccess: applyPreview });
+      // (the import was undone: the file is uploaded again)
+      void request("reading", () => preview.mutateAsync({ file, accountId: id }), (data) => ({ preview: data, undone: false }));
     }
   }
 
   function remove() {
     if (p && !committed) discard.mutate(p.staging_id);
+    onReview(false);
     onRemove();
   }
 
   function commitNow(auto: boolean, verified = false) {
-    if (!accountId || !p) return;
+    if (!accountId || !p || snapshot.busy || sending.current) return;
+    const staged = p;
     const rowDecisions = Object.entries(decisions).map(([rowIndex, decision]) => ({
       source_row_index: Number(rowIndex),
       decision,
     }));
-    commit.mutate(
-      { stagingId: p.staging_id, accountId, rowDecisions, auto, verified },
-      {
-        onSuccess: (result) => {
-          setCommitted(result);
-          setSeenInHistory(false); // the list of imports doesn't know it yet
-          setAutoImported(auto);
-          setReviewOpen(false);
-          // imported by hand (maybe taught, maybe "don't ask again"): the other files may know their kind now
-          if (!auto) noteLearned();
-        },
-        onError: (error) => {
-          if (!auto) return;
-          // e.g. a file of the same month was imported meanwhile: show the fresh preview
-          setManual(true);
-          setAutoRefused((error as Error).message);
-          commit.reset();
-          reparseWith(p.options);
-        },
+    void request(
+      "importing",
+      () => commit.mutateAsync({ stagingId: staged.staging_id, accountId, rowDecisions, auto, verified }),
+      // (the list of imports doesn't know it yet)
+      (result) => ({ committed: result, seenInHistory: false, autoImported: auto }),
+      (message) => (auto ? { manual: true, autoRefused: message } : { commitError: message })
+    ).then((imported) => {
+      if (imported) {
+        onReview(false);
+        // imported by hand (maybe taught, maybe "don't ask again"): the other files may know their kind now
+        if (!auto) noteLearned();
+      } else if (auto) {
+        // e.g. a file of the same month was imported meanwhile: show the fresh preview
+        void readAgain(staged, staged.options, accountId);
       }
-    );
+    });
   }
 
   // Another file was imported by hand meanwhile — taught, confirmed, or just
@@ -218,49 +260,42 @@ export function ImportFileCard({
   // now (once), unless the user chose its account or columns themselves.
   const learned = useLearnedVersion();
   const knownLearned = useRef(learned);
-  const accountChosen = useRef(false);
   useEffect(() => {
     if (learned === knownLearned.current) return;
-    if (committed || undone || formOptions || accountChosen.current) {
+    if (committed || undone || formOptions || snapshot.accountChosen) {
       knownLearned.current = learned;
       return;
     }
-    if (!p || preview.isPending || reparse.isPending || commit.isPending || recognize.isPending) return;
+    if (!p || snapshot.busy) return;
     knownLearned.current = learned;
-    setReviewOpen(false);
-    recognize.mutate(p.staging_id, {
-      onSuccess: (data) => {
-        setManual(false); // an automatic choice of the only account doesn't count
-        applyPreview(data);
-      },
-    });
+    onReview(false);
+    const stagingId = p.staging_id;
+    // (manual: an automatic choice of the only account doesn't count)
+    void request("reading", () => recognize.mutateAsync(stagingId), (data) => ({ preview: data, manual: false }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [learned, p, committed, undone, formOptions, preview.isPending, reparse.isPending, commit.isPending]);
+  }, [learned, p, committed, undone, formOptions, snapshot.busy]);
 
-  // Recognized and nothing to check: import without asking. A kind of file
-  // not checked yet, or one with something to look at, opens the review.
+  // A kind of file not checked yet, or one with something to look at, opens
+  // the review (a PDF nothing was read from too: there it can be taught) —
+  // when no other file's review is open; then it waits for that to close.
+  const wantsReview =
+    p !== undefined &&
+    !committed &&
+    p.review_reasons.length > 0 &&
+    (p.account_id !== null || (p.page_count > 0 && p.transaction_count === 0)) &&
+    !snapshot.reviewDismissed &&
+    hasOriginal(p);
   useEffect(() => {
-    if (!p || committed || commit.isPending) return;
-    // a PDF nothing was read from opens it too: there it can be taught
-    const teachable = p.page_count > 0 && p.transaction_count === 0;
-    if (p.review_reasons.length > 0 && (p.account_id !== null || teachable) && !reviewDismissed && hasOriginal(p)) {
-      setReviewOpen(true);
-    } else if (p.auto_import && autoImport && !manual && p.review_reasons.length === 0) {
-      commitNow(true);
-    }
+    if (wantsReview && !reviewOpen && !reviewElsewhere && !snapshot.busy) onReview(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p, wantsReview, reviewElsewhere]);
+
+  // Recognized and nothing to check: import without asking.
+  useEffect(() => {
+    if (!p || committed || snapshot.busy || wantsReview) return;
+    if (p.auto_import && autoImport && !manual && p.review_reasons.length === 0) commitNow(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p]);
-
-  // The file is not imported any more: back to choosing an account.
-  function forgetImport() {
-    commit.reset();
-    setCommitted(undefined);
-    setSeenInHistory(false);
-    setPreview(undefined);
-    setManual(true);
-    setUndone(true);
-    setPickAccount(true);
-  }
 
   // The card outlives its import: it may be removed in the list below or in
   // another window, and its number may belong to another import since. Once
@@ -269,19 +304,17 @@ export function ImportFileCard({
   const stillImported = committed !== undefined && isSameImport(committed, history.data);
   useEffect(() => {
     if (!committed || !history.data || history.isFetching) return;
-    if (stillImported) setSeenInHistory(true);
-    else if (seenInHistory) forgetImport();
+    if (stillImported) {
+      if (!seenInHistory) onSnapshot({ seenInHistory: true });
+    } else if (seenInHistory) onSnapshot(NOT_IMPORTED);
     // (not seen yet: the list is from before this import and is being read again)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [committed, history.data, history.isFetching, stillImported, seenInHistory]);
 
   function undo() {
-    if (!committed || !stillImported) return;
-    removal.mutate(committed.import_id, {
-      onSuccess: () => {
-        forgetImport();
-      },
-    });
+    if (!committed || !stillImported || snapshot.busy) return;
+    const importId = committed.import_id;
+    void request("undoing", () => removal.mutateAsync(importId), () => NOT_IMPORTED);
   }
 
   const duplicateRows = useMemo(() => (p ? p.row_classifications.filter((r) => r.status !== "new") : []), [p]);
@@ -296,10 +329,9 @@ export function ImportFileCard({
   const willSkipCount = p ? Object.values(decisions).filter((d) => d === "skip").length : 0;
   const needsWarningConfirmation = p ? p.warning_count > 0 || p.unusable_row_count > 0 : false;
   const importable = p && p.account_id !== null && !p.ambiguous && !p.has_errors;
-  const busy = preview.isPending || reparse.isPending || recognize.isPending;
-  const autoPending = commit.isPending && p?.auto_import && !manual;
+  const autoPending = importing && p?.auto_import && !manual;
 
-  const requestError = (preview.error ?? reparse.error ?? recognize.error ?? removal.error) as Error | null;
+  const requestError = snapshot.error;
   const choosingAccount = !committed && !unreadable && (pickAccount || (p !== undefined && p.account_id === null) || undone);
   const accountName = p?.account_name ?? "";
 
@@ -323,7 +355,7 @@ export function ImportFileCard({
           {waiting && <Badge tone="neutral">{t("importCard.waiting")}</Badge>}
           {busy && <Badge tone="neutral">{t("importCard.parsing")}</Badge>}
           {(requestError || unreadable) && <Badge tone="danger">{t("importCard.error")}</Badge>}
-          {!commit.isPending && (
+          {!importing && (
             <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={remove} title={t("importCard.removeTitle")}>
               {committed ? t("common.close") : t("common.remove")}
             </Button>
@@ -372,7 +404,7 @@ export function ImportFileCard({
             <button
               type="button"
               className="text-xs text-accent-strong underline underline-offset-2"
-              onClick={() => setReviewOpen(true)}
+              onClick={() => onReview(true)}
             >
               {t("importCard.review")}
             </button>
@@ -381,7 +413,7 @@ export function ImportFileCard({
             <button
               type="button"
               className="text-xs text-accent-strong underline underline-offset-2"
-              onClick={() => setShowMapping(true)}
+              onClick={() => choose({ showMapping: true })}
             >
               {t("importCard.adjust")}
             </button>
@@ -389,13 +421,13 @@ export function ImportFileCard({
         </div>
       )}
 
-      {autoRefused && !committed && (
-        <div className="mt-3 rounded-md bg-warning-soft px-3 py-2 text-xs text-warning">{autoRefused}</div>
+      {snapshot.autoRefused && !committed && (
+        <div className="mt-3 rounded-md bg-warning-soft px-3 py-2 text-xs text-warning">{snapshot.autoRefused}</div>
       )}
 
       {requestError && (
         <div className="mt-3 rounded-md bg-danger-soft border border-danger/20 px-3 py-2 text-xs text-danger">
-          {requestError.message}
+          {requestError}
         </div>
       )}
 
@@ -405,7 +437,7 @@ export function ImportFileCard({
 
           {unreadable && p.page_count > 0 && (
             <div className="flex flex-wrap items-center gap-3 text-xs text-ink-muted">
-              <Button variant="secondary" className="!py-1 text-xs" onClick={() => setReviewOpen(true)}>
+              <Button variant="secondary" className="!py-1 text-xs" onClick={() => onReview(true)}>
                 {t("teach.openForFile")}
               </Button>
               <span>{t("teach.openForFileHint")}</span>
@@ -416,12 +448,12 @@ export function ImportFileCard({
             <ColumnMappingForm
               key={p.staging_id + JSON.stringify(p.options)}
               preview={p}
-              isPending={reparse.isPending}
+              isPending={busy}
               onSubmit={(options) => {
-                setFormOptions(true);
+                onSnapshot({ formOptions: true });
                 reparseWith(options);
               }}
-              onCancel={p.ambiguous ? undefined : () => setShowMapping(false)}
+              onCancel={p.ambiguous ? undefined : () => choose({ showMapping: false })}
             />
           )}
         </div>
@@ -484,7 +516,7 @@ export function ImportFileCard({
                   row={row}
                   parsedTx={rowsByIndex.get(row.source_row_index)}
                   decision={decisions[row.source_row_index] ?? defaultDecisionFor(row.status)}
-                  onDecisionChange={(d) => setDecisions((prev) => ({ ...prev, [row.source_row_index]: d }))}
+                  onDecisionChange={(d) => choose({ decisions: { ...decisions, [row.source_row_index]: d } })}
                 />
               ))}
             </div>
@@ -507,7 +539,7 @@ export function ImportFileCard({
                 type="checkbox"
                 className="mt-0.5"
                 checked={warningsConfirmed}
-                onChange={(e) => setWarningsConfirmed(e.target.checked)}
+                onChange={(e) => choose({ warningsConfirmed: e.target.checked })}
               />
               {t("importCard.confirmWarnings")}
             </label>
@@ -515,12 +547,12 @@ export function ImportFileCard({
 
           <Button
             variant="primary"
-            disabled={commit.isPending || busy || willImportCount + willSkipCount === 0 || (needsWarningConfirmation && !warningsConfirmed)}
+            disabled={importing || busy || willImportCount + willSkipCount === 0 || (needsWarningConfirmation && !warningsConfirmed)}
             onClick={() => commitNow(false)}
           >
-            {commit.isPending ? t("importCard.importing") : t("importCard.import")}
+            {importing ? t("importCard.importing") : t("importCard.import")}
           </Button>
-          {commit.isError && <div className="text-xs text-danger">{(commit.error as Error).message}</div>}
+          {snapshot.commitError && <div className="text-xs text-danger">{snapshot.commitError}</div>}
         </div>
       )}
 
@@ -529,7 +561,7 @@ export function ImportFileCard({
       {committed && (
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           <span className="text-income">
-            {autoImported
+            {snapshot.autoImported
               ? tn("importCard.autoDone", committed.transactions_created, { account: accountName })
               : tn("importCard.done", committed.transactions_created)}
             {committed.rows_skipped > 0 && t("importCard.skipped", { count: committed.rows_skipped })}
@@ -538,22 +570,23 @@ export function ImportFileCard({
           <button
             type="button"
             className="text-ink-muted underline underline-offset-2 hover:text-ink disabled:opacity-50"
-            disabled={removal.isPending || !stillImported}
+            disabled={undoing || !stillImported}
             onClick={undo}
             title={t("importCard.undoTitle")}
           >
-            {removal.isPending ? t("imports.removing") : t("importCard.undo")}
+            {undoing ? t("imports.removing") : t("importCard.undo")}
           </button>
         </div>
       )}
       {reviewOpen && p && (
         <ImportReview
           preview={p}
-          importing={commit.isPending}
+          importing={importing}
+          error={snapshot.commitError ?? requestError}
           canImport={Boolean(importable) && !committed && willImportCount + willSkipCount > 0}
           onImport={(dontAskAgain) => commitNow(false, dontAskAgain)}
           onTeach={p.page_count > 0 ? teach : undefined}
-          teaching={reparse.isPending}
+          teaching={busy}
           accountPicker={
             <span className="flex items-center gap-2 text-xs text-ink-muted">
               {t("importCard.whichAccount")}
@@ -561,8 +594,8 @@ export function ImportFileCard({
             </span>
           }
           onClose={() => {
-            setReviewOpen(false);
-            setReviewDismissed(true);
+            onReview(false);
+            onSnapshot({ reviewDismissed: true });
           }}
         />
       )}

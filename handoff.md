@@ -8,22 +8,21 @@ Tests und die Doku im Repo sind Englisch.
 
 Ein Architektur-Audit des Repos (Version 0.8.0) hat 15 größere Befunde
 (Nr. 1–15) und eine Tabelle kleiner „Quick Wins“ ergeben. Erledigt und
-getestet sind die Befunde 1–12 und großteils 14 sowie ein Teil der Quick Wins (Abschnitt
-„Quick Wins“). Offen sind die Befunde 13, 15, Reste von 7, 8 und 14 und der Rest der Quick Wins.
+getestet sind die Befunde 1–13 und großteils 14 sowie ein Teil der Quick Wins (Abschnitt
+„Quick Wins“). Offen sind Befund 15, Reste von 7, 8 und 14 und der Rest der Quick Wins.
 
 Der Nutzer committet selbst. Die Befunde 1–6 stehen in Commit `68a370d`
 ("Harden imports, restores, and schema upgrades"); der Stand davor war
 `f0a3d0f`. Die neun erledigten Quick Wins sind ebenfalls committet (bis
 `7b5b058`), Befund 12 in `899e8b4`, Befund 14 und die kleinen Frontend-Punkte
 danach, die Befunde 7–9 in `fe7c671` und `2b37ef1`, Befund 10 in `f88a6fc`.
-Befund 11 lag am 2026-11-12 noch uncommittet im Arbeitsverzeichnis
-(Commit-Message im Chat des Nutzers): 42 geänderte und 7 neue Dateien, alle
-unter `backend/` (neu: `app/iban.py`, `app/api/transaction_listing.py`,
-`app/importers/pdf_layouts/lines.py`, `app/services/card_bill_linking.py`,
-`app/services/import_reading.py`, `app/services/rule_patterns.py`,
-`tests/test_architecture.py`), dazu `handoff.md`. Vor neuer Arbeit mit
-`git status` prüfen, ob das inzwischen committet ist — wenn nicht, den Nutzer
-darauf hinweisen und diese Dateien nicht anfassen.
+Befund 11 in `14b6eba`. Befund 13 lag am 2026-11-12 noch uncommittet im
+Arbeitsverzeichnis (Commit-Message im Chat des Nutzers): im Frontend
+`components/imports/ImportFileCard.tsx` (+ Test), `ImportFileCards.tsx` (neu),
+`ImportReview.tsx`, `pages/Imports.tsx`, `state/importQueue.ts`; dazu
+`CHANGELOG.md` und `handoff.md`. Vor neuer Arbeit mit `git status` prüfen, ob
+das inzwischen committet ist — wenn nicht, den Nutzer darauf hinweisen und
+diese Dateien nicht anfassen.
 
 ## Arbeitsweise, die der Nutzer erwartet
 
@@ -111,6 +110,11 @@ das ist das `--stop`, kein Fehler.
 
 - Bash-Heredocs mit Apostrophen im Inhalt scheitern im Tool
   („unexpected EOF“). Dateien mit dem Edit-/Write-Werkzeug ändern.
+- Vitest scheitert in **jeder** Testdatei mit „Vitest failed to find the
+  runner“, wenn das Arbeitsverzeichnis mit kleinem Laufwerksbuchstaben
+  betreten wurde (`cd /c/Users/...` in Git Bash ergibt `c:\...`). Mit
+  `cd "C:/Users/..."` wechseln; `node -e "console.log(process.cwd())"` zeigt,
+  was Node sieht.
 - Ein `cd` im Bash-Tool bleibt für den nächsten Aufruf bestehen; absolute
   Pfade verwenden.
 - `backend/.venv`, `frontend/node_modules`, `frontend/dist` existieren lokal
@@ -132,7 +136,7 @@ gleichem Betrag wird weiterhin automatisch verknüpft. Eine strengere Regel
 („nur was wie eine Kartenabrechnung aussieht“) würde das Verknüpfen für jeden
 Herausgeber abschalten, dessen Abbuchungstext keine Regel kennt.
 
-## Befunde 7–15: Stand (7–12 erledigt, 14 großteils; offen 13, 15)
+## Befunde 7–15: Stand (7–13 erledigt, 14 großteils; offen 15)
 
 Zeilennummern stammen vom Audit-Stand und können sich verschoben haben; die
 Funktionsnamen sind verlässlich.
@@ -314,18 +318,56 @@ direkt auf). Vorher → nachher:
   es in `.restore-*/previous/imports`; der Ordner wird dann nicht gelöscht
   und beim Start im Log genannt. Der Restore selbst gilt als gelungen.
 
-### 13. Import-Karte verliert ihr Ergebnis und versteckt Fehler
-- Wo: `frontend/src/components/imports/ImportFileCard.tsx`,
-  `ImportReview.tsx`.
-- Problem: `mutate`-Callbacks gehen beim Seitenwechsel verloren (importierte
-  Datei zeigt danach „Preview not found“); Commit-Fehler werden hinter dem
-  Vollbild-Review gerendert; mehrere Reviews stapeln sich, ein Escape schließt
-  alle. 610 Zeilen, 14 `useState`, 5 Effekte mit unterdrückten Deps.
-- Fix: Ergebnisse per `mutateAsync().then(saveSnapshot)` in den Store;
-  `error` als Prop an `ImportReview`; ein `openReviewKey` in der Queue;
-  mittelfristig `useImportCard`-Reducer extrahieren.
-- Es gibt jetzt `ImportFileCard.test.tsx` (echte Hooks, gestubbte
-  API-Module) als Vorlage für weitere Tests.
+### 13. Import-Karte verliert ihr Ergebnis und versteckt Fehler — erledigt
+- Umgesetzt: Was eine Anfrage der Karte ändert, steht jetzt in der
+  Warteschlange (`CardSnapshot` in `state/importQueue.ts`), nicht mehr in
+  `useState` der Karte: Vorschau, Import-Ergebnis, die laufende Anfrage
+  (`busy`: `waiting` / `reading` / `importing` / `undoing`), Fehler
+  (`error`, `commitError`, `autoRefused`) und die Merker (`manual`,
+  `accountChosen`, …). Die Karte liest alles aus ihrer `snapshot`-Prop und
+  schickt jede Anfrage über `request()` (`mutateAsync`, Ergebnis per
+  `onSnapshot` in die Warteschlange). Folgen:
+  - Die Antwort auf einen Import kommt auch an, wenn die Seite inzwischen
+    verlassen wurde; vorher zeigte die Karte danach wieder die Vorschau und
+    ein zweiter Import-Versuch endete in „Preview not found“.
+  - Wird die Seite geöffnet, während der Import noch läuft, wird nicht ein
+    zweites Mal importiert (`busy` ist bekannt).
+  - Dateien werden weitergelesen, während eine andere Seite offen ist
+    (vorher gab eine wartende Karte ihren Platz zurück und begann beim
+    Zurückkommen neu).
+  - Ein Fehler, der kam, während die Seite nicht offen war, steht beim
+    Zurückkommen auf der Karte.
+- Fehler stehen im Review: `ImportReview` hat die Prop `error` und zeigt sie
+  als `role="alert"` über der Fußzeile (Import-Fehler und Fehler beim
+  erneuten Lesen). Der Import-Knopf im Review ist gesperrt, solange ein
+  angelernter Reader angewendet wird.
+- Ein Review zur Zeit: `reviewKey` in der Warteschlange (`useReviewKey`,
+  `showReview`). Wollen mehrere Dateien ihr Review zeigen, öffnet sich das
+  nächste, wenn das offene geschlossen wird; Escape schließt nur das offene.
+- Wird eine Karte entfernt, während ihre Datei hochgeladen wird, wird die
+  hochgeladene Datei verworfen (`saveSnapshot` meldet `false`, wenn die
+  Datei nicht mehr in der Warteschlange ist) — das war einer der kleinen
+  Frontend-Befunde unten.
+- `components/imports/ImportFileCards.tsx` verdrahtet Karten und
+  Warteschlange (vorher in `pages/Imports.tsx`); die Tests in
+  `ImportFileCard.test.tsx` laufen darüber mit der echten Warteschlange
+  (zwölf Tests, sieben neu). Gegenprobe: zwei Szenarien gegen den alten
+  Stand gefahren (Import bei Seitenwechsel, Weiterlesen), die übrigen per
+  herausgenommener Schutzstelle.
+- Die Karte hat jetzt vier `useState` (vorher 17) und fünf Effekte. Vier
+  davon haben weiterhin unterdrückte Abhängigkeiten, weil sie Funktionen
+  aus dem Render aufrufen; das geht erst mit einem ausgelagerten Reducer
+  ganz weg (bewusst nicht gemacht: die Zustandshoheit liegt jetzt richtig,
+  ein Reducer wäre ein Umschreiben der Karte ohne weiteren Fehler, den er
+  behebt).
+- Geändertes Verhalten, das auffallen kann: Nach einem fehlgeschlagenen
+  Upload wird beim erneuten Öffnen der Seite weiterhin neu hochgeladen; das
+  Auswahlfeld für das Konto bleibt nach „Rückgängig“ sichtbar, bis der neue
+  Upload geklappt hat (vorher verschwand es sofort, und nach einem Fehler
+  gab es keinen Weg mehr, ein Konto zu wählen).
+- Nicht mit echtem Browser ausprobiert; StrictMode (doppelte Effekte im
+  Entwicklungsmodus) ist nur durchdacht, nicht getestet — dafür gibt es
+  `started` und `sending` als Refs in der Karte.
 
 ### 14. Fehlgeschlagene Abfragen erscheinen als „keine Daten“ — teilweise erledigt
 - Erledigt: `pages/CreditCards.tsx`, `pages/Budgets.tsx`, `pages/Accounts.tsx`
@@ -391,7 +433,7 @@ Status wird hier fortgeschrieben.
 - `components/accounts/AccountRow.tsx`: ein fehlgeschlagenes Archivieren
   zeigt nichts; `components/budgets/BudgetProgressRow.tsx`: Budget wird ohne
   Rückfrage gelöscht.
-- `ImportFileCard.tsx` `remove()`: Karte während des Uploads entfernt →
+- **Erledigt (mit Befund 13):** `ImportFileCard.tsx` `remove()`: Karte während des Uploads entfernt →
   die hochgeladene Datei bleibt bis zu 24 h im Staging.
 - `pages/Points.tsx`: Punktewerte sind fest als EUR formatiert
   (`PointsProgram` hat keine Währung).

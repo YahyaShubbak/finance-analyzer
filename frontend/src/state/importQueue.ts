@@ -1,9 +1,18 @@
 import { useSyncExternalStore } from "react";
 import type { ImportCommitResult, ImportPreview, ImportRecord } from "../types";
 
-/** What an import card has reached, so it is still there after visiting
- * another page (the card itself is unmounted meanwhile). */
+/** What an import card has reached and what it is doing. Kept here, not in
+ * the card: the card is unmounted while another page is shown, and the
+ * answer to a request it sent (the upload, the import) must still arrive. */
 export interface CardSnapshot {
+  /** the request under way — one at a time */
+  busy?: "waiting" | "reading" | "importing" | "undoing";
+  /** why the last request failed (reading the file, undoing the import) */
+  error?: string;
+  /** why the import failed */
+  commitError?: string;
+  /** why the file was not imported by itself after all */
+  autoRefused?: string;
   preview?: ImportPreview;
   committed?: ImportCommitResult;
   /** the list of imports has shown `committed` — from then on, its absence means it is gone */
@@ -11,6 +20,8 @@ export interface CardSnapshot {
   autoImported?: boolean;
   /** the user took over (chose an account, undid an import): no automatic import */
   manual?: boolean;
+  /** the user chose the account: the file is not read again by itself */
+  accountChosen?: boolean;
   undone?: boolean;
   /** the parse options come from the user's column/format dialog */
   formOptions?: boolean;
@@ -41,21 +52,46 @@ export function useImportQueue(): QueuedFile[] {
   return useSyncExternalStore(subscribe, () => queue);
 }
 
-export function addFiles(files: File[]) {
+/** Returns the new cards' keys. */
+export function addFiles(files: File[]): string[] {
   // A counter, not the file's name/size: dropping the same file twice
   // must still give each card its own identity.
-  queue = [...queue, ...files.map((file) => ({ key: `file-${nextKey++}`, file, snapshot: {} }))];
+  const added = files.map((file) => ({ key: `file-${nextKey++}`, file, snapshot: {} }));
+  queue = [...queue, ...added];
   emit();
+  return added.map((q) => q.key);
 }
 
 export function removeFile(key: string) {
   queue = queue.filter((q) => q.key !== key);
+  if (reviewKey === key) reviewKey = null;
   emit();
 }
 
-export function saveSnapshot(key: string, patch: CardSnapshot) {
+// The import review fills the window: one file's at a time. Several files
+// that want theirs looked at get it one after the other — opened together
+// they lay on top of each other, and one Escape closed them all.
+let reviewKey: string | null = null;
+
+/** The file whose import review is open. */
+export function useReviewKey(): string | null {
+  return useSyncExternalStore(subscribe, () => reviewKey);
+}
+
+/** Opens a file's import review — unless another file's is open — or closes it. */
+export function showReview(key: string, open: boolean) {
+  if (open ? reviewKey !== null : reviewKey !== key) return;
+  reviewKey = open ? key : null;
+  emit();
+}
+
+/** Returns false when the file is not in the queue any more (its card was
+ * removed, or everything was reset): the answer has nowhere to go. */
+export function saveSnapshot(key: string, patch: CardSnapshot): boolean {
+  if (!queue.some((q) => q.key === key)) return false;
   queue = queue.map((q) => (q.key === key ? { ...q, snapshot: { ...q.snapshot, ...patch } } : q));
   emit();
+  return true;
 }
 
 /** Is the import a card made still in the list of imports? A card outlives
@@ -72,6 +108,7 @@ export function isSameImport(committed: ImportCommitResult, imports: ImportRecor
  * the data there is now. */
 export function clearQueue() {
   queue = [];
+  reviewKey = null;
   emit();
 }
 
