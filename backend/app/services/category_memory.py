@@ -26,6 +26,14 @@ def merchant_key(merchant: str | None) -> str | None:
     return key or None
 
 
+def category_memory(session: Session) -> CategoryMemory:
+    """The memory for the current data: built by reading every booking, so
+    remembered until the data changes."""
+    from app.db.session import remembered
+
+    return remembered(session, "category_memory", lambda: CategoryMemory(session))
+
+
 class CategoryMemory:
     def __init__(self, session: Session):
         corrected = set(session.exec(

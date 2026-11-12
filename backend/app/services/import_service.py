@@ -226,6 +226,7 @@ def commit_parsed_import(
     stored_path: str,
     document_type: DocumentType | None = None,
     row_decisions: dict[int, str] | None = None,
+    classified: list | None = None,
 ) -> CommitResult:
     """Persist a previously-parsed import: creates the ImportRecord, raw
     transactions, and normalized transactions, classifying duplicates
@@ -264,9 +265,11 @@ def commit_parsed_import(
             count=existing.detected_transaction_count, date=format_date(existing.imported_at),
         ))
 
-    classifications = {c.source_row_index: c for c in classify_import_rows(session, account, parsed.transactions,
-                                                                           parsed.filename,
-                                                                           (parsed.period_start, parsed.period_end))}
+    # (`classified`: the caller just did it for these rows, under the same lock — not twice)
+    if classified is None:
+        classified = classify_import_rows(session, account, parsed.transactions, parsed.filename,
+                                          (parsed.period_start, parsed.period_end))
+    classifications = {c.source_row_index: c for c in classified}
 
     import_record = ImportRecord(
         filename=parsed.filename,

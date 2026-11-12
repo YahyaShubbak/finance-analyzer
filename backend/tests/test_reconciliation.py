@@ -433,3 +433,64 @@ def test_a_debit_the_user_left_unsorted_by_hand_is_not_linked_without_asking(ses
     rec = reconcile_statement(session, stmt.id, auto_match=True)
 
     assert rec.bank_debit_transaction_id is None
+
+
+def test_statements_with_nothing_to_link_are_not_computed_and_stored_again(session, checking_account, credit_card_account, monkeypatch):
+    """After every import the statements still waiting for their debit are looked at again.
+    One with nothing to link was reconciled and committed each time all the same."""
+    from app.reconciliation import engine
+
+    statements = []
+    for number, total in enumerate((5000, 7000), start=1):
+        imp = _make_import(session, credit_card_account.id, filename=f"cc_{number}.pdf", checksum=f"cc{number}")
+        _add_cc_transaction(session, credit_card_account.id, imp.id, number, -total)
+        stmt = _make_statement(session, credit_card_account.id, imp.id, total_minor=total)
+        reconcile_statement(session, stmt.id, auto_match=True)  # as an import does: stored, pending
+        statements.append(stmt)
+
+    real = engine.reconcile_statement
+    reconciled = []
+    monkeypatch.setattr(engine, "reconcile_statement", lambda s, statement_id, **kw: reconciled.append(statement_id) or real(s, statement_id, **kw))
+
+    assert engine.link_pending_payments(session) == 0
+    assert reconciled == []
+
+    # ... and a debit that arrives is linked as before
+    debit = _add_bank_debit(session, checking_account.id, 14, -7000)
+    assert engine.link_pending_payments(session) == 1
+    assert reconciled == [statements[1].id]
+    session.refresh(debit)
+    assert debit.settles_statement_id == statements[1].id
+
+
+def test_a_statement_without_a_stored_reconciliation_still_gets_one(session, checking_account, credit_card_account):
+    from sqlmodel import select
+
+    from app.db.models import Reconciliation
+    from app.reconciliation.engine import link_pending_payments
+
+    imp = _make_import(session, credit_card_account.id)
+    _add_cc_transaction(session, credit_card_account.id, imp.id, 2, -5000)
+    stmt = _make_statement(session, credit_card_account.id, imp.id, total_minor=5000)
+
+    assert link_pending_payments(session) == 0
+    stored = session.exec(select(Reconciliation).where(Reconciliation.statement_id == stmt.id)).one()
+    assert stored.status.value == "pending"
+
+
+def test_statements_whose_amount_no_free_debit_has_are_not_even_matched(session, checking_account, credit_card_account, monkeypatch):
+    from app.reconciliation import engine
+
+    for number, total in enumerate((5000, 7000), start=1):
+        imp = _make_import(session, credit_card_account.id, filename=f"cc_{number}.pdf", checksum=f"cc{number}")
+        _add_cc_transaction(session, credit_card_account.id, imp.id, number, -total)
+        stmt = _make_statement(session, credit_card_account.id, imp.id, total_minor=total)
+        reconcile_statement(session, stmt.id, auto_match=True)
+    _add_bank_debit(session, checking_account.id, 14, -1234)  # a debit, but of another amount
+
+    real = engine.find_automatic_match
+    looked_at = []
+    monkeypatch.setattr(engine, "find_automatic_match", lambda s, statement: looked_at.append(statement.id) or real(s, statement))
+
+    assert engine.link_pending_payments(session) == 0
+    assert looked_at == []

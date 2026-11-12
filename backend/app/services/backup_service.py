@@ -523,6 +523,7 @@ def restore_from_backup(zip_path: Path, confirm: bool) -> RestoreResult:
                 raise BackupError(failed + " " + tr(
                     "Your data could not be put back completely. Stop the app; what was there before is in "
                     "the folder {folder}.", folder=staging_root / _PREVIOUS) + hint) from exc
+            db_session.note_data_changed()  # another database now: nothing remembered about the data holds
             # The restore is done. What else lay in the imports folder goes back there.
             if not _keep_other_files(staging_root / _PREVIOUS / "imports", settings.imports_dir, replaced_documents):
                 keep_staging = True  # named in the log, and again on every start-up until it is dealt with

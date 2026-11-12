@@ -89,7 +89,11 @@ class UnsortedSuggestions:
     def for_transaction(self, tx: Transaction) -> str | None:
         if tx.is_transfer or not (tx.category is None or tx.category in UNSORTED_CATEGORIES):
             return None
-        self._suggester = self._suggester or CategorySuggester(self._session)
+        if self._suggester is None:
+            from app.db.session import remembered
+
+            # the model reads every sorted booking: built once per state of the data, not per page
+            self._suggester = remembered(self._session, "category_suggester", lambda: CategorySuggester(self._session))
         raw = tx.raw_transaction
         return self._suggester.suggest(tx.merchant, raw.original_description if raw else tx.normalized_description,
                                        tx.transaction_type == TransactionType.INCOME)

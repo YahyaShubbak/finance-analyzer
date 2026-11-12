@@ -200,3 +200,49 @@ def test_duplicate_rows_never_flagged_needs_review(session, checking_account):
     assert statuses[0] == "exact_duplicate"
     assert statuses[1] == "possible_duplicate"
     assert statuses[2] == "new"
+
+
+def test_only_bookings_near_the_files_dates_are_compared(session, checking_account, monkeypatch):
+    """A preview compared its rows with every booking of the account. Only those within a few
+    days of the file can be a duplicate of one of its rows."""
+    from datetime import date
+
+    from app.db.models import ImportRecord, RawTransaction, Transaction, TransactionType
+    from app.importers.base import ParsedTransaction
+    from app.services import duplicate_preview_service as service
+    from app.services.duplicate_detection import compute_duplicate_fingerprint
+
+    record = ImportRecord(filename="old.csv", stored_path="old.csv", file_checksum="old", account_id=checking_account.id,
+                          status="imported")
+    session.add(record)
+    session.commit()
+
+    def booking(day: date, description: str, amount: int) -> int:
+        raw = RawTransaction(import_id=record.id, source_row_index=0, original_description=description)
+        session.add(raw)
+        session.commit()
+        tx = Transaction(
+            raw_transaction_id=raw.id, account_id=checking_account.id, transaction_date=day,
+            normalized_description=description, amount_minor=amount, currency="EUR",
+            transaction_type=TransactionType.EXPENSE,
+            duplicate_fingerprint=compute_duplicate_fingerprint(checking_account.id, day.isoformat(), amount, description),
+        )
+        session.add(tx)
+        session.commit()
+        return tx.id
+
+    years_ago = [booking(date(2020, 1, day), f"Old shop {day}", -1000) for day in range(1, 21)]
+    same_day = booking(date(2026, 3, 10), "Coffee Shop", -450)
+    three_days_before = booking(date(2026, 3, 7), "Bakery", -300)
+
+    compared = []
+    real = service._existing_counterparties
+    monkeypatch.setattr(service, "_existing_counterparties", lambda s, ids: compared.extend(ids) or real(s, ids))
+    rows = [ParsedTransaction(source_row_index=0, original_date_text="2026-03-10", original_description="Coffee Shop",
+                              original_amount_text="-4.50", parsed_amount_minor=-450, parsed_date="2026-03-10")]
+
+    [row] = service.classify_import_rows(session, checking_account, rows)
+
+    assert row.status == "exact_duplicate" and row.match.id == same_day
+    assert sorted(compared) == sorted([same_day, three_days_before])
+    assert not set(compared) & set(years_ago)

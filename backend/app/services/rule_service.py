@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 from sqlmodel import Session, select
 
@@ -34,6 +35,10 @@ from app.db.models import (
     TransactionType,
     UserCorrection,
 )
+
+# (at import time, not when first used: importing it registers the SQL function fold() for
+# every database connection opened from then on - _could_contain relies on it)
+from app.db.session import fold_text
 from app.i18n import tr
 from app.normalization.category import UNSORTED_CATEGORIES
 
@@ -49,6 +54,20 @@ _TRAILING_DIGITS_RE = re.compile(r"\s+\d{2,}\s*$")
 
 class RuleServiceError(Exception):
     pass
+
+
+def _could_contain(pattern: str, *columns):
+    """SQL condition: one of `columns` may contain the plain `pattern`
+    (compared folded, as the search does). Never misses a row the pattern
+    occurs in ignoring case — the exact check stays with the caller — so
+    that only those rows are loaded, not every booking for every lesson.
+    None when the pattern can't be searched for this way."""
+    from sqlalchemy import func, or_
+
+    if not pattern or "\n" in pattern:
+        return None
+    escaped = fold_text(pattern).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return or_(*(func.fold(column).like(f"%{escaped}%", escape="\\") for column in columns))
 
 
 # Words that say HOW something was paid, not WHO was paid.
@@ -143,9 +162,13 @@ def _rename_matching(session: Session, rule: MerchantRule, skip_id: int) -> int:
     corrected = set(session.exec(select(UserCorrection.transaction_id, UserCorrection.field)).all())
     word = re.compile(rf"(?<!\w){re.escape(rule.pattern)}(?!\w)", re.IGNORECASE)
     changed = 0
-    for tx, raw in session.exec(
-        select(Transaction, RawTransaction).join(RawTransaction, RawTransaction.id == Transaction.raw_transaction_id)
-    ).all():
+    query = select(Transaction, RawTransaction).join(RawTransaction, RawTransaction.id == Transaction.raw_transaction_id)
+    # the counterparty is read from the raw row's JSON, where a quote or backslash is written escaped
+    if not any(ch in rule.pattern for ch in '"\\'):
+        candidates = _could_contain(rule.pattern, RawTransaction.original_description, RawTransaction.extra_fields_json)
+        if candidates is not None:
+            query = query.where(candidates)
+    for tx, raw in session.exec(query).all():
         if tx.id == skip_id or (tx.id, "merchant") in corrected or tx.merchant == rule.normalized_merchant:
             continue
         text = " ".join(filter(None, [raw_counterparty(raw), raw.original_description]))
@@ -197,6 +220,7 @@ def _identifying_words(text: str) -> list[str]:
     return [w for w in re.findall(r"[a-zäöüß]+", text.lower()) if len(w) >= 3 and w not in _NON_IDENTIFYING]
 
 
+@lru_cache(maxsize=65536)  # chain_index asks for every payee text of every booking, on each request that needs it
 def derive_category_pattern(text: str) -> str | None:
     """The part of a merchant/description that names WHO was paid, so a
     learned category also fits the next booking with that payee:
@@ -332,9 +356,12 @@ def recategorize_matching(session: Session, rule: CategoryRule, skip_ids: frozen
     corrected = set(session.exec(select(UserCorrection.transaction_id, UserCorrection.field)).all())
 
     changed = 0
-    rows = session.exec(
-        select(Transaction, RawTransaction).join(RawTransaction, RawTransaction.id == Transaction.raw_transaction_id)
-    ).all()
+    query = select(Transaction, RawTransaction).join(RawTransaction, RawTransaction.id == Transaction.raw_transaction_id)
+    candidates = None if rule.is_regex else _could_contain(
+        rule.pattern, Transaction.merchant, RawTransaction.original_description)
+    if candidates is not None:
+        query = query.where(candidates)
+    rows = session.exec(query).all()
     for tx, raw in rows:
         if tx.id in skip_ids or (tx.id, "category") in corrected or tx.transaction_type == TransactionType.TRANSFER:
             continue
@@ -420,9 +447,9 @@ def reapply_rules(session: Session) -> ReapplyResult:
     rows = session.exec(
         select(Transaction, RawTransaction).join(RawTransaction, RawTransaction.id == Transaction.raw_transaction_id)
     ).all()
-    from app.services.category_memory import CategoryMemory
+    from app.services.category_memory import category_memory
 
-    memory = CategoryMemory(session)
+    memory = category_memory(session)
     merchants_changed = categories_changed = 0
     for tx, raw in rows:
         merchant_fixed = (tx.id, "merchant") in corrected

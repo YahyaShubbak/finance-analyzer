@@ -110,7 +110,16 @@ def _members(chain: str, stems: dict[str, tuple[str, bool]]) -> int:
 
 
 def chain_index(session: Session) -> dict[str, str]:
-    """For every payee in the user's bookings: its chain, where it has one."""
+    """For every payee in the user's bookings: its chain, where it has one.
+    Read from every booking, so remembered until the data changes (the
+    review queue asks for it with every page, learning with every click)."""
+    from app.db.session import remembered
+
+    # (it reads the bookings' merchant and description only)
+    return remembered(session, "chain_index", lambda: _chain_index(session), payees_only=True)
+
+
+def _chain_index(session: Session) -> dict[str, str]:
     from app.services.rule_service import derive_category_pattern
 
     patterns = set()

@@ -329,3 +329,47 @@ def test_a_document_that_cannot_be_stored_is_explained_and_leaves_no_half_copy(c
     assert "could not be stored" in r.json()["detail"] and "No space left on device" in r.json()["detail"]
     assert _stored_documents() == []
     assert client.get("/api/imports").json() == []
+
+
+def test_a_preview_works_out_the_files_signature_once(client, monkeypatch):
+    """It opens the file again and reads its whole text; a preview asked for it up to three times."""
+    from app.api.routes import imports as imports_route
+
+    asked = []
+    real = imports_route.file_signature
+    monkeypatch.setattr(imports_route, "file_signature", lambda path, parsed: asked.append(path.name) or real(path, parsed))
+    account_id = _create_account(client)
+
+    _preview(client, "a.csv", _CSV, account_id)  # the account chosen
+    assert len(asked) == 1
+
+    asked.clear()
+    r = client.post("/api/imports/preview", files={"file": ("b.csv", io.BytesIO(_CSV.replace(b"X", b"Y")), "text/csv")})
+    assert r.status_code == 200, r.text  # the account to be recognized
+    assert len(asked) == 1
+
+
+def test_an_automatic_import_classifies_its_rows_once(client, monkeypatch):
+    """The check for possible duplicates and the import itself each compared every row with the
+    account's bookings."""
+    from app.api.routes import imports as imports_route
+    from app.services import import_service
+
+    classified = []
+    real = imports_route.classify_import_rows
+
+    def counting(*args, **kwargs):
+        classified.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(imports_route, "classify_import_rows", counting)
+    monkeypatch.setattr(import_service, "classify_import_rows", counting)
+    account_id = _create_account(client)
+    preview = _preview(client, "a.csv", _CSV, account_id)
+    classified.clear()
+
+    r = client.post("/api/imports/commit", json={"staging_id": preview["staging_id"], "account_id": account_id, "auto": True})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["transactions_created"] == 1
+    assert len(classified) == 1

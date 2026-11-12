@@ -173,3 +173,62 @@ def test_payment_without_identifying_payee_changes_only_itself(client):
     assert tx[-450]["category"] == "Shopping"
     assert tx[-720]["category"] != "Shopping"
     assert client.get("/api/rules/category").json() == []
+
+
+def test_learning_finds_the_other_bookings_whatever_their_case_and_umlauts(client):
+    """Only the bookings the payee's name occurs in are looked at (not every booking, for every
+    lesson) — found whatever their case, also where the name has umlauts."""
+    account_id = _account(client)
+    _import(client, account_id, [
+        "2026-03-01,Töpferei Müller Kassel,-4.50",
+        "2026-03-02,TÖPFEREI MÜLLER KASSEL,-7.20",
+        "2026-03-03,töpferei müller kassel,-9.90",
+        "2026-03-04,Töpferei Müllerstrasse Kassel,-3.00",
+    ], "march.csv")
+    tx = _by_amount(client)
+
+    r = client.post(f"/api/transactions/{tx[-450]['id']}/category-rule", json={"category": "Shopping"})
+    assert r.status_code == 200, r.text
+    assert r.json()["applied_to"] == 2
+
+    tx = _by_amount(client)
+    assert [tx[amount]["category"] for amount in (-450, -720, -990)] == ["Shopping"] * 3
+    assert tx[-300]["category"] == "Other Expense"  # another payee
+    assert client.get("/api/rules/category").json()[0]["matching_transactions"] == 3
+
+    # ... and forgetting the rule finds them again
+    rule_id = client.get("/api/rules/category").json()[0]["id"]
+    assert client.delete(f"/api/rules/category/{rule_id}").json()["transactions_changed"] == 2
+    assert _by_amount(client)[-720]["category"] == "Other Expense"
+
+
+def test_a_lesson_loads_only_the_bookings_it_could_apply_to(client):
+    """Each assignment in the review queue loaded every booking with its raw row: seconds per
+    click in a database of some years."""
+    from sqlalchemy import event
+
+    from app.db.models import Transaction
+
+    account_id = _account(client)
+    others = [f"2026-02-{day % 28 + 1:02d},Laden Nummer {chr(65 + day % 26)}{chr(65 + day // 26)} Musterstadt,-{day}.00"
+              for day in range(1, 61)]
+    _import(client, account_id, [
+        "2026-03-01,Kartenzahlung Kiosk Sonnenschein Einkauf,-4.50",
+        "2026-03-05,Kartenzahlung Kiosk Sonnenschein Einkauf,-7.20",
+        *others,
+    ], "march.csv")
+    tx = _by_amount(client)
+
+    loaded = []
+
+    def count(target, _context):
+        loaded.append(target.id)
+
+    event.listen(Transaction, "load", count)
+    try:
+        r = client.post(f"/api/transactions/{tx[-450]['id']}/category-rule", json={"category": "Food"})
+    finally:
+        event.remove(Transaction, "load", count)
+
+    assert r.status_code == 200 and r.json()["applied_to"] == 1
+    assert len(set(loaded)) < 10  # the two kiosk bookings — not all 62

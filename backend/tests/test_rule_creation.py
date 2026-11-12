@@ -175,3 +175,38 @@ def test_creating_same_merchant_rule_twice_does_not_duplicate(client):
     rule_id_2 = r2.json()["merchant_rule"]["id"]
 
     assert rule_id_1 == rule_id_2  # same pattern re-used, not duplicated
+
+
+def test_merchant_rule_reaches_bookings_that_name_the_payee_only_in_their_payee_column(client):
+    """Only the bookings the pattern occurs in are looked at; the payee column is kept with the
+    raw row, not in the description."""
+    account_id = _create_account(client)
+    _import_csv(client, "giro.csv", (
+        b"Date,Name,Description,Amount\n"
+        b"2026-03-01,Kiosk Sonnenschein,Einkauf eins,-4.50\n"
+        b"2026-03-02,Kiosk Sonnenschein,Einkauf zwei,-7.20\n"
+        b"2026-03-03,Kiosk Mondschein,Einkauf drei,-3.00\n"
+    ), account_id)
+    items = {t["amount_minor"]: t for t in client.get("/api/transactions").json()["items"]}
+
+    r = client.post(f"/api/transactions/{items[-450]['id']}/merchant-rule", json={"normalized_merchant": "Sonnenkiosk"})
+    assert r.status_code == 200, r.text
+    assert r.json()["applied_to"] == 1
+
+    items = {t["amount_minor"]: t for t in client.get("/api/transactions").json()["items"]}
+    assert items[-450]["merchant"] == items[-720]["merchant"] == "Sonnenkiosk"
+    assert items[-300]["merchant"] != "Sonnenkiosk"
+
+
+def test_merchant_rule_for_a_name_with_quotes_still_reaches_its_other_bookings(client):
+    account_id = _create_account(client)
+    _import_csv(client, "giro.csv", (
+        b"Date,Name,Description,Amount\n"
+        b'2026-03-01,"Kiosk ""Zur Sonne""",Einkauf eins,-4.50\n'
+        b'2026-03-02,"Kiosk ""Zur Sonne""",Einkauf zwei,-7.20\n'
+    ), account_id)
+    items = {t["amount_minor"]: t for t in client.get("/api/transactions").json()["items"]}
+
+    r = client.post(f"/api/transactions/{items[-450]['id']}/merchant-rule", json={"normalized_merchant": "Sonnenkiosk"})
+    assert r.status_code == 200, r.text
+    assert r.json()["applied_to"] == 1

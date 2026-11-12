@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import threading
 import unicodedata
-from collections.abc import Iterator
+import weakref
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session as OrmSession
 from sqlmodel import Session, create_engine
 
 from app.config import settings
@@ -72,6 +74,102 @@ def _register_sql_functions(dbapi_connection, _connection_record):
 
 
 engine: Engine = _build_engine()
+
+
+# ---------------------------------------------------------------------------
+# Values worked out from all the data, kept until the data changes
+# ---------------------------------------------------------------------------
+# The chains among the payees, what each merchant is usually sorted as, the
+# model that suggests categories: each is built by reading every booking.
+# Built once per state of the data instead of once per request, they turn
+# seconds of work per click into none. "State of the data" is counted in
+# commits: any commit through a session makes every remembered value stale.
+# What only depends on which bookings exist and on their payee texts (the
+# chains) outlives commits that change neither — sorting a booking into a
+# category, the most frequent change of all.
+
+_generation = 0        # any committed change
+_payee_generation = 0  # committed changes of which bookings exist, or of a booking's merchant / description
+_remembered: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # engine -> {name: (generation, value)}
+_UNCOMMITTED = "writes_since_commit"
+_PAYEES_TOUCHED = "payee_writes_since_commit"
+
+
+def note_data_changed() -> None:
+    """The data changed without a session's commit telling (the database
+    file was replaced by a restore): forget what was remembered."""
+    global _generation, _payee_generation
+    _generation += 1
+    _payee_generation += 1
+
+
+def _touches_payees(session) -> bool:
+    from sqlalchemy import inspect as state_of
+
+    from app.db.models import Transaction
+
+    if any(isinstance(obj, Transaction) for obj in (*session.new, *session.deleted)):
+        return True
+    for obj in session.dirty:
+        if isinstance(obj, Transaction):
+            attributes = state_of(obj).attrs
+            if attributes.merchant.history.has_changes() or attributes.normalized_description.history.has_changes():
+                return True
+    return False
+
+
+@event.listens_for(OrmSession, "after_commit")
+def _committed(session) -> None:
+    global _generation, _payee_generation
+    session.info.pop(_UNCOMMITTED, None)
+    _generation += 1
+    if session.info.pop(_PAYEES_TOUCHED, None):
+        _payee_generation += 1
+
+
+@event.listens_for(OrmSession, "after_flush")
+def _flushed(session, _flush_context) -> None:
+    # (still before the flush is cleared away: new / dirty / deleted and the attributes' history are intact)
+    session.info[_UNCOMMITTED] = True
+    if _touches_payees(session):
+        session.info[_PAYEES_TOUCHED] = True
+
+
+@event.listens_for(OrmSession, "do_orm_execute")
+def _executing(state) -> None:
+    # An INSERT, UPDATE or DELETE statement changes data without a flush of
+    # objects — whatever it touches, so it counts for everything.
+    if state.is_insert or state.is_update or state.is_delete:
+        state.session.info[_UNCOMMITTED] = True
+        state.session.info[_PAYEES_TOUCHED] = True
+
+
+@event.listens_for(OrmSession, "after_soft_rollback")
+def _rolled_back(session, _previous_transaction) -> None:
+    session.info.pop(_UNCOMMITTED, None)
+    session.info.pop(_PAYEES_TOUCHED, None)
+
+
+def remembered[T](session: Session, name: str, build: Callable[[], T], *, payees_only: bool = False) -> T:
+    """`build()`'s result for the committed data `session` reads — built once
+    and shared (so never to be changed by a caller) until something is
+    committed. A session holding changes of its own that are not committed
+    yet sees other data than everyone else: it gets a fresh `build()`, and
+    what it builds is not kept.
+
+    `payees_only`: the value depends on nothing but which bookings exist and
+    their merchant and description; it then stays through commits that
+    change other things."""
+    if session.info.get(_UNCOMMITTED) or session.new or session.dirty or session.deleted:
+        return build()
+    slot = _remembered.setdefault(session.get_bind(), {})
+    generation = _payee_generation if payees_only else _generation
+    hit = slot.get(name)
+    if hit is not None and hit[0] == generation:
+        return hit[1]
+    value = build()
+    slot[name] = (generation, value)
+    return value
 
 
 def init_db() -> None:

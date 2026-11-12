@@ -282,19 +282,26 @@ def classify_import_rows(
     if isinstance(account, int):
         account = session.get(Account, account)
     merchant_rules, category_rules = load_rules(session)
-    from app.services.category_memory import CategoryMemory
+    from app.services.category_memory import category_memory
 
-    memory = CategoryMemory(session)
+    memory = category_memory(session)
     from app.services.account_recognition import own_ibans_by_account
 
     own_ibans = own_ibans_by_account(session)
 
+    # Only bookings near the file's dates can be a row's duplicate (same date, or a few days
+    # apart for the other kind of file): not the account's whole history, for every preview.
+    row_dates = [date.fromisoformat(p.parsed_date) for p in parsed_transactions
+                 if p.parsed_date is not None and p.parsed_amount_minor is not None]
+    reach = timedelta(days=max(CROSS_FILE_DATE_WINDOW_DAYS, POSSIBLE_DUPLICATE_DATE_WINDOW_DAYS))
     existing_transactions = session.exec(
         select(Transaction).where(
             Transaction.account_id == account.id,
             Transaction.is_duplicate == False,  # noqa: E712
+            Transaction.transaction_date >= min(row_dates) - reach,
+            Transaction.transaction_date <= max(row_dates) + reach,
         ).order_by(Transaction.id)
-    ).all()
+    ).all() if row_dates else []
     existing_by_fingerprint: dict[str, list[Transaction]] = defaultdict(list)
     existing_by_compact: dict[tuple, list[Transaction]] = defaultdict(list)
     existing_by_amount: dict[int, list[Transaction]] = defaultdict(list)

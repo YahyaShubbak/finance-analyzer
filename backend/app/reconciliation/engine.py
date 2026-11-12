@@ -243,10 +243,30 @@ def link_pending_payments(session: Session) -> int:
     linked = 0
     for _round in range(3):  # one link may make another one unambiguous
         newly = 0
+        # In one query each instead of several per statement: which statements the user dealt
+        # with (None: no reconciliation stored yet), which have their payment, and the amounts
+        # of the bank debits still free — a statement whose amount is not among them has
+        # nothing to be linked with.
+        handled_by_statement = dict(session.exec(select(Reconciliation.statement_id, Reconciliation.resolved_by_user)).all())
+        paid = set(session.exec(
+            select(Transaction.settles_statement_id).where(Transaction.settles_statement_id != None)  # noqa: E711
+        ).all())
+        free_amounts = set(session.exec(
+            select(Transaction.amount_minor).join(Account, Account.id == Transaction.account_id).where(
+                Account.account_type != AccountType.CREDIT_CARD, Transaction.amount_minor < 0,
+                Transaction.is_duplicate == False, Transaction.settles_statement_id == None,  # noqa: E711, E712
+            ).distinct()
+        ).all())
         for statement in statements:
-            handled = session.exec(select(Reconciliation.resolved_by_user).where(
-                Reconciliation.statement_id == statement.id)).first()
-            if handled or current_bank_payment(session, statement) is not None:
+            handled = handled_by_statement.get(statement.id)
+            if handled or statement.id in paid:
+                continue
+            # Nothing to link, and its reconciliation is stored already (handled is None: not yet):
+            # computing and committing it again after every import made a batch of N files cost N x N.
+            if handled is not None and (
+                not statement.statement_total_minor or -statement.statement_total_minor not in free_amounts
+                or find_automatic_match(session, statement) is None
+            ):
                 continue
             if reconcile_statement(session, statement.id, auto_match=True).bank_debit_transaction_id is not None:
                 newly += 1

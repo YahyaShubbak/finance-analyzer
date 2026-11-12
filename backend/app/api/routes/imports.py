@@ -53,6 +53,7 @@ from app.services import import_staging
 from app.services.account_recognition import (
     STATEMENT_ON_CARD_ACCOUNT,
     Recognition,
+    Signature,
     confirmed_warning_codes,
     ensure_signatures,
     file_signature,
@@ -102,6 +103,17 @@ def _parse(staged_path: Path, options: ParseOptions) -> ParsedImport:
         return parse_file(staged_path, original_filename=import_staging.original_filename(staged_path), options=options)
     except ImportServiceError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _signature(staged_path: Path, parsed: ParsedImport) -> Signature:
+    """file_signature, once per reading of the file: it opens the file twice
+    more and extracts its whole text, and a preview asked for it up to three
+    times (recognizing the account, the IBAN check, the review reasons)."""
+    cached = getattr(parsed, "_file_signature", None)
+    if cached is None:
+        cached = file_signature(staged_path, parsed)
+        parsed._file_signature = cached  # noqa: SLF001 - a memo on the parse result, gone with it
+    return cached
 
 
 def _remove_unreferenced_document(session: Session, path: Path) -> None:
@@ -259,7 +271,7 @@ def _review_reasons(session: Session, staged_path: Path, parsed: ParsedImport, a
     account hasn't had (and that wasn't checked), or something to look at."""
     reasons = []
     if account is not None and not parsed.has_errors:
-        seen, verified = kind_history(session, file_signature(staged_path, parsed), account.id)
+        seen, verified = kind_history(session, _signature(staged_path, parsed), account.id)
         if not seen and not verified:
             reasons.append("new_kind")
     if not parsed.transactions:
@@ -278,7 +290,7 @@ def _review_reasons(session: Session, staged_path: Path, parsed: ParsedImport, a
 def _iban_of_another_account(session: Session, staged_path: Path, parsed: ParsedImport, account: Account) -> Account | None:
     """The user's other account whose IBAN the file prints as its own, when
     the chosen account's IBAN isn't printed."""
-    own = set(file_signature(staged_path, parsed).identifiers)
+    own = set(_signature(staged_path, parsed).identifiers)
     if account.iban and f"iban:{account.iban}" in own:
         return None
     others = [a for a in session.exec(select(Account)).all()
@@ -343,7 +355,7 @@ def _recognized_preview(session: Session, staging_id: str, staged_path: Path,
     the previous file of its kind was read — when the user chose no options."""
     parsed = _parse(staged_path, parse_options)
     ensure_signatures(session)
-    recognition = recognize_account(session, parsed, file_signature(staged_path, parsed))
+    recognition = recognize_account(session, parsed, _signature(staged_path, parsed))
     if recognition is None:
         return _build_preview(session, staging_id, staged_path, None, parse_options, parsed=parsed)
     if recognition.options is not None and parse_options == ParseOptions():
@@ -436,16 +448,16 @@ def commit_import(payload: ImportCommitRequest, session: Session = Depends(get_s
         options = import_staging.load_options(payload.staging_id)
         parsed = _parse(staged_path, options)
         decision_map = {d.source_row_index: d.decision for d in payload.row_decisions}
-        if payload.auto and not parsed.has_errors and any(
-            c.status == "possible_duplicate"
-            for c in classify_import_rows(session, account, parsed.transactions, parsed.filename,
-                                                   (parsed.period_start, parsed.period_end))
-        ):
+        classified = None
+        if payload.auto and not parsed.has_errors:
+            classified = classify_import_rows(session, account, parsed.transactions, parsed.filename,
+                                              (parsed.period_start, parsed.period_end))
+        if classified is not None and any(c.status == "possible_duplicate" for c in classified):
             raise HTTPException(status_code=409, detail=tr(
                 "Some rows of this file now look like transactions that are already imported. "
                 "Please check the preview and import it yourself."
             ))
-        signature = file_signature(staged_path, parsed)
+        signature = _signature(staged_path, parsed)
 
         # The original document is stored before the database commit, so a
         # committed import can never point at a missing file.
@@ -462,6 +474,7 @@ def commit_import(payload: ImportCommitRequest, session: Session = Depends(get_s
         try:
             result = commit_parsed_import(
                 session, parsed, payload.account_id, stored_path=stored_name, row_decisions=decision_map,
+                classified=classified,
             )
         except ImportServiceError as exc:
             final_path.unlink(missing_ok=True)
