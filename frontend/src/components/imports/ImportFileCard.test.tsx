@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ImportFileCard } from "./ImportFileCard";
 import { LanguageProvider } from "../../i18n/LanguageProvider";
-import { listImports, removeImport } from "../../api/imports";
+import { listImports, previewImport, removeImport } from "../../api/imports";
 import { listAccounts } from "../../api/accounts";
 import type { CardSnapshot } from "../../state/importQueue";
 import type { ImportCommitResult, ImportRecord } from "../../types";
@@ -49,7 +49,6 @@ function renderCard(snapshot: CardSnapshot) {
           autoImport={false}
           snapshot={snapshot}
           onSnapshot={onSnapshot}
-          onDone={() => {}}
           onRemove={() => {}}
         />
       </QueryClientProvider>
@@ -120,5 +119,47 @@ describe("ImportFileCard: undoing the import a card made", () => {
     expect(undoButton()).toBeDisabled();
     await userEvent.click(undoButton());
     expect(removeImport).not.toHaveBeenCalled();
+  });
+});
+
+describe("ImportFileCard: many files dropped at once", () => {
+  it("uploads two at a time; the others wait for their turn", async () => {
+    vi.mocked(listAccounts).mockResolvedValue([]);
+    vi.mocked(listImports).mockResolvedValue([]);
+    const fail: Array<(reason: Error) => void> = [];
+    vi.mocked(previewImport).mockImplementation(() => new Promise((_resolve, reject) => fail.push(reject)) as never);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(
+      <LanguageProvider>
+        <QueryClientProvider client={queryClient}>
+          {["a.csv", "b.csv", "c.csv", "d.csv"].map((name) => (
+            <ImportFileCard
+              key={name}
+              file={new File(["date,amount"], name)}
+              autoImport={false}
+              snapshot={{}}
+              onSnapshot={() => {}}
+              onRemove={() => {}}
+            />
+          ))}
+        </QueryClientProvider>
+      </LanguageProvider>
+    );
+
+    await waitFor(() => expect(previewImport).toHaveBeenCalledTimes(2));
+    expect(screen.getAllByText("Waiting for its turn…")).toHaveLength(2);
+
+    // one upload is over (here: it failed): the next file gets its turn
+    fail[0](new Error("Could not read a.csv"));
+    await waitFor(() => expect(previewImport).toHaveBeenCalledTimes(3));
+    expect(await screen.findByText("Could not read a.csv")).toBeInTheDocument();
+    expect(screen.getAllByText("Waiting for its turn…")).toHaveLength(1);
+
+    fail[1](new Error("b"));
+    fail[2](new Error("c"));
+    await waitFor(() => expect(previewImport).toHaveBeenCalledTimes(4));
+    fail[3](new Error("d")); // (leaves no turn taken for the tests after this one)
+    await waitFor(() => expect(screen.queryByText("Waiting for its turn…")).not.toBeInTheDocument());
   });
 });

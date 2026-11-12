@@ -156,6 +156,7 @@ export const en = {
   "importCard.layout": " · {layout} format",
   "importCard.imported": "Imported",
   "importCard.parsing": "Parsing…",
+  "importCard.waiting": "Waiting for its turn…",
   "importCard.error": "Error",
   "importCard.removeTitle": "Remove from list",
   "importCard.adjust": "Adjust columns / formats",

@@ -53,7 +53,11 @@ export function useCommitImport() {
       auto?: boolean;
       verified?: boolean;
     }) => commitImport(stagingId, accountId, rowDecisions, auto, verified),
-    onSuccess: () => invalidateTransactionDependentQueries(qc),
+    // Not awaited (nothing returned): the import is done when the server says so, not when
+    // every list on the page was loaded again — with many files, each waited for all of that.
+    onSuccess: () => {
+      void invalidateTransactionDependentQueries(qc);
+    },
   });
 }
 

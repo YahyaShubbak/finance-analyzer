@@ -4,7 +4,6 @@ import { PageHeader } from "../components/ui";
 import { DropZone } from "../components/imports/DropZone";
 import { ImportFileCard } from "../components/imports/ImportFileCard";
 import { ImportHistory } from "../components/imports/ImportHistory";
-import { useImportHistory } from "../hooks/useImports";
 import { loadAutoImportPreference, saveAutoImportPreference } from "../state/autoImportPreference";
 import { addFiles, removeFile, saveSnapshot, useImportQueue } from "../state/importQueue";
 
@@ -13,7 +12,6 @@ export function Imports() {
   // kept outside the page: pending files survive a visit to another page
   const queue = useImportQueue();
   const [autoImport, setAutoImportState] = useState(loadAutoImportPreference);
-  const history = useImportHistory();
 
   function setAutoImport(value: boolean) {
     setAutoImportState(value);
@@ -46,7 +44,6 @@ export function Imports() {
                 autoImport={autoImport}
                 snapshot={qf.snapshot}
                 onSnapshot={(patch) => saveSnapshot(qf.key, patch)}
-                onDone={() => history.refetch()}
                 onRemove={() => removeFile(qf.key)}
               />
             ))}

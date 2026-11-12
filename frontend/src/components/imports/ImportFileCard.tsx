@@ -17,7 +17,7 @@ import {
 import { useAccounts } from "../../hooks/useAccounts";
 import { useI18n } from "../../i18n/useI18n";
 import { formatDate, formatMoney, formatSignedMoney } from "../../lib/format";
-import { isSameImport, noteLearned, useLearnedVersion, type CardSnapshot } from "../../state/importQueue";
+import { isSameImport, noteLearned, uploadSlot, useLearnedVersion, type CardSnapshot } from "../../state/importQueue";
 import type {
   Account,
   ImportCommitResult,
@@ -45,7 +45,6 @@ export function ImportFileCard({
   autoImport,
   snapshot,
   onSnapshot,
-  onDone,
   onRemove,
 }: {
   file: File;
@@ -54,7 +53,6 @@ export function ImportFileCard({
   /** where the card was before the page was left (see state/importQueue) */
   snapshot: CardSnapshot;
   onSnapshot: (patch: CardSnapshot) => void;
-  onDone: () => void;
   onRemove: () => void;
 }) {
   const { t, tn } = useI18n();
@@ -103,11 +101,32 @@ export function ImportFileCard({
     setShowMapping(data.ambiguous && data.available_columns.length > 0);
   }
 
-  // Read the file right away; the backend recognizes its account if it can.
+  // Read the file right away — when its turn comes: of many files dropped at
+  // once, a few are uploaded and read at a time (state/importQueue). The
+  // backend recognizes the file's account if it can.
+  const [waiting, setWaiting] = useState(() => !snapshot.preview && !snapshot.committed && !snapshot.undone);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   useEffect(() => {
     if (started.current || snapshot.preview || snapshot.committed || snapshot.undone) return;
     started.current = true;
-    preview.mutate({ file }, { onSuccess: applyPreview });
+    void uploadSlot().then((release) => {
+      if (!mounted.current) return release(); // the page was left: its turn is asked for again when it is opened
+      setWaiting(false);
+      preview
+        .mutateAsync({ file })
+        .then((data) => {
+          onSnapshot({ preview: data }); // kept also when the page was left meanwhile: not uploaded again
+          applyPreview(data);
+        })
+        .catch(() => {}) // shown from preview.error
+        .finally(release);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -179,7 +198,6 @@ export function ImportFileCard({
           setSeenInHistory(false); // the list of imports doesn't know it yet
           setAutoImported(auto);
           setReviewOpen(false);
-          onDone();
           // imported by hand (maybe taught, maybe "don't ask again"): the other files may know their kind now
           if (!auto) noteLearned();
         },
@@ -262,7 +280,6 @@ export function ImportFileCard({
     removal.mutate(committed.import_id, {
       onSuccess: () => {
         forgetImport();
-        onDone();
       },
     });
   }
@@ -303,6 +320,7 @@ export function ImportFileCard({
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {committed && <Badge tone="income">{t("importCard.imported")}</Badge>}
+          {waiting && <Badge tone="neutral">{t("importCard.waiting")}</Badge>}
           {busy && <Badge tone="neutral">{t("importCard.parsing")}</Badge>}
           {(requestError || unreadable) && <Badge tone="danger">{t("importCard.error")}</Badge>}
           {!commit.isPending && (

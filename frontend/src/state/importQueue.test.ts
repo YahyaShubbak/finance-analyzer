@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSameImport } from "./importQueue";
+import { MAX_PARALLEL_UPLOADS, isSameImport, uploadSlot } from "./importQueue";
 import type { ImportCommitResult, ImportRecord } from "../types";
 
 function committed(importId: number, filename: string): ImportCommitResult {
@@ -44,5 +44,30 @@ describe("isSameImport (may a card still undo its import?)", () => {
 
   it("is unknown — so not undone — while the list isn't loaded", () => {
     expect(isSameImport(committed(7, "march.csv"), undefined)).toBe(false);
+  });
+});
+
+describe("uploadSlot (a few uploads at a time)", () => {
+  it("gives the next one its turn when an upload is over", async () => {
+    expect(MAX_PARALLEL_UPLOADS).toBe(2);
+    const turns: string[] = [];
+    const first = await uploadSlot();
+    const second = await uploadSlot();
+    void uploadSlot().then((release) => {
+      turns.push("third");
+      release();
+    });
+    await Promise.resolve();
+    expect(turns).toEqual([]); // two are uploading: the third waits
+
+    first();
+    first(); // ending a turn twice does not give two turns away
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(turns).toEqual(["third"]);
+
+    second();
+    const again = await uploadSlot(); // all free again
+    again();
   });
 });

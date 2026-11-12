@@ -157,6 +157,7 @@ export const de: Record<MessageKey, string> = {
   "importCard.layout": " · Format {layout}",
   "importCard.imported": "Importiert",
   "importCard.parsing": "Wird gelesen…",
+  "importCard.waiting": "Wartet, bis sie dran ist…",
   "importCard.error": "Fehler",
   "importCard.removeTitle": "Aus der Liste entfernen",
   "importCard.adjust": "Spalten / Formate anpassen",

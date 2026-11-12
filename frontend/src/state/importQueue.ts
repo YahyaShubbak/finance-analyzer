@@ -75,6 +75,34 @@ export function clearQueue() {
   emit();
 }
 
+// Of many files dropped at once, only a few are uploaded and read at a time:
+// each one is a full parse on the server (a PDF several times over), and all
+// of them at once made every one slow — and the app with them.
+export const MAX_PARALLEL_UPLOADS = 2;
+let uploading = 0;
+const waitingForSlot: Array<(release: () => void) => void> = [];
+
+function grant(resolve: (release: () => void) => void) {
+  uploading += 1;
+  let released = false;
+  resolve(() => {
+    if (released) return;
+    released = true;
+    uploading -= 1;
+    const next = waitingForSlot.shift();
+    if (next) grant(next);
+  });
+}
+
+/** Resolves when it is the caller's turn to upload, with the function that
+ * ends the turn (to be called when the upload is over, however it ended). */
+export function uploadSlot(): Promise<() => void> {
+  return new Promise((resolve) => {
+    if (uploading < MAX_PARALLEL_UPLOADS) grant(resolve);
+    else waitingForSlot.push(resolve);
+  });
+}
+
 // Counts what the user taught or confirmed by importing a file by hand. Files
 // dropped together were all read on upload — before that — and read
 // themselves again when it changes (ImportFileCard).
