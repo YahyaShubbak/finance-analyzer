@@ -123,3 +123,33 @@ def test_row_decision_keep_imports_exact_duplicate_as_legitimate_transaction(ses
     txs = session.exec(select(Transaction)).all()
     assert len(txs) == 3
     assert all(not t.is_duplicate for t in txs)  # all are genuine, non-duplicate-flagged transactions
+
+
+def test_a_long_file_is_stored_in_a_few_writes_and_every_booking_keeps_its_row(session, checking_account, tmp_path):
+    """One flush per row made a year's export thousands of round trips to the
+    database. Written together, each booking must still belong to exactly
+    the raw row it was read from — also next to a row that gets no booking."""
+    from sqlalchemy import event
+
+    rows = [f"2026-01-{day % 28 + 1:02d},Shop number {day},-{day}.50" for day in range(1, 201)]
+    rows.insert(100, "2026-01-15,A row without an amount,")
+    path = tmp_path / "year.csv"
+    path.write_text("Date,Description,Amount\n" + "\n".join(rows) + "\n", encoding="utf-8")
+    parsed = parse_file(path)
+
+    flushes = []
+    event.listen(session, "after_flush", lambda *_: flushes.append(1))
+    result = commit_parsed_import(session, parsed, checking_account.id, "imports/year.csv")
+
+    assert result.transactions_created == 200
+    assert len(flushes) < 20  # not one per row
+
+    raws = {r.id: r for r in session.exec(select(RawTransaction)).all()}
+    assert len(raws) == 201 and sorted(r.source_row_index for r in raws.values()) == list(range(201))
+    txs = session.exec(select(Transaction)).all()
+    assert len({t.raw_transaction_id for t in txs}) == 200
+    for tx in txs:
+        raw = raws[tx.raw_transaction_id]
+        assert raw.original_description == tx.normalized_description
+        assert raw.original_amount_text == f"{tx.amount_minor / 100:.2f}"
+    assert not any(raws[t.raw_transaction_id].original_description == "A row without an amount" for t in txs)

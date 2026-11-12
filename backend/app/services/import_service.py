@@ -290,8 +290,10 @@ def commit_parsed_import(
     new_transactions: list[Transaction] = []
     row_tx: dict[int, Transaction | int] = {}  # a row's booking: new, or the one it duplicated
 
-    for ptx in parsed.transactions:
-        raw = RawTransaction(
+    # The raw rows first, written together: a booking needs its raw row's id,
+    # and one flush per row made a year's export thousands of round trips.
+    raw_rows = [
+        RawTransaction(
             import_id=import_record.id,
             source_row_index=ptx.source_row_index,
             original_date_text=ptx.original_date_text,
@@ -300,9 +302,12 @@ def commit_parsed_import(
             original_currency_text=ptx.original_currency_text,
             extra_fields_json=_raw_extra_json(ptx),
         )
-        session.add(raw)
-        session.flush()
+        for ptx in parsed.transactions
+    ]
+    session.add_all(raw_rows)
+    session.flush()
 
+    for ptx, raw in zip(parsed.transactions, raw_rows, strict=True):
         if ptx.parsed_date is None or ptx.parsed_amount_minor is None:
             # Cannot normalize a transaction we couldn't parse the date/amount
             # for; it is still preserved as a raw record for auditability,
