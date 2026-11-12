@@ -494,3 +494,61 @@ def test_a_card_debit_on_a_late_due_date_is_linked(client, tmp_path):
     debit = next(t for t in client.get("/api/transactions", params={"account_id": giro}).json()["items"]
                  if t["amount_minor"] == -6000)
     assert debit["is_transfer"]  # not counted as an expense on top of the card's purchases
+
+
+# ---------------------------------------------------------------------------
+# Lines ending in two amounts: the statement's balances choose the reading
+# ---------------------------------------------------------------------------
+
+def _line(row, amount_text, alternative=None):
+    from app.importers.pdf_layouts.base import PDFParsedLine
+
+    return PDFParsedLine(source_row_index=row, date_text="01.03.2026", description=f"Shop {row}",
+                         amount_text=amount_text, alternative=alternative)
+
+
+def test_the_one_reading_that_fits_the_balances_is_chosen():
+    """"Shop 12,00 -5,00": 12,00 with a balance column — or -5,00 with a
+    number in the text. 100,00 - 10,00 - 5,00 = 85,00 says which."""
+    from app.importers.pdf_layouts.generic_bank import _check_balances, _settle_by_balance
+
+    lines = [_line(1, "-10,00"), _line(2, "12,00", alternative=("Shop 2 12,00", "-5,00"))]
+    events = [(0, "open", "100,00"), (3, "close", "85,00")]
+    assert _check_balances(events, lines)[0] == {"ok": False, "difference_minor": -1700}
+
+    assert _settle_by_balance(events, lines) is True
+
+    assert (lines[1].description, lines[1].amount_text) == ("Shop 2 12,00", "-5,00")
+    assert lines[1].alternative == ("Shop 2", "12,00")  # the other reading stays known
+    assert _check_balances(events, lines)[0] == {"ok": True, "difference_minor": 0}
+
+
+def test_readings_stay_as_they_are_when_the_balances_fit_several_or_none():
+    from app.importers.pdf_layouts.generic_bank import _settle_by_balance
+
+    # either line read the other way explains the closing balance: no telling which
+    lines = [_line(1, "12,00", alternative=("Shop 1 12,00", "-5,00")),
+             _line(2, "12,00", alternative=("Shop 2 12,00", "-5,00"))]
+    assert _settle_by_balance([(0, "open", "100,00"), (3, "close", "107,00")], lines) is False
+    assert [(line.description, line.amount_text) for line in lines] == [("Shop 1", "12,00"), ("Shop 2", "12,00")]
+
+    # no combination does
+    assert _settle_by_balance([(0, "open", "100,00"), (3, "close", "1,23")], lines) is False
+    assert [(line.description, line.amount_text) for line in lines] == [("Shop 1", "12,00"), ("Shop 2", "12,00")]
+
+
+def test_trying_the_readings_does_not_read_every_amount_again_each_time(monkeypatch):
+    """Ten such lines are up to 1023 combinations, each checked over every
+    line of the statement: with each amount parsed anew, a long statement
+    took seconds — per reading of the file, and a preview reads it several times."""
+    from app.importers.pdf_layouts import generic_bank
+
+    parsed = []
+    real = generic_bank.parse_amount_to_minor_units
+    monkeypatch.setattr(generic_bank, "parse_amount_to_minor_units", lambda text: parsed.append(text) or real(text))
+    lines = [_line(row, "-10,37", alternative=(f"Shop {row} 7,41", "-3,19") if row <= 10 else None)
+             for row in range(1, 61)]
+
+    assert generic_bank._settle_by_balance([(0, "open", "1.000,53"), (61, "close", "1,29")], lines) is False
+
+    assert len(parsed) < 50  # four different amounts — not 1023 x 62

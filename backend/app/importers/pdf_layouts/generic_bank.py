@@ -9,6 +9,7 @@ real bank's export.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 from app.db.models import DocumentType
 from app.i18n import format_amount, tr
@@ -290,6 +291,14 @@ def _settle_by_balance(events: list[tuple[int, str, str]], lines: list[PDFParsed
     return bool(chosen)
 
 
+@lru_cache(maxsize=8192)
+def _amount_minor(amount_text: str) -> int:
+    """parse_amount_to_minor_units, remembered per text: _settle_by_balance
+    checks the balances once per combination of readings (up to 1023 times),
+    each time over every line of the statement."""
+    return parse_amount_to_minor_units(amount_text)
+
+
 def _check_balances(events: list[tuple[int, str, str]], lines: list[PDFParsedLine]) -> tuple[dict | None, int]:
     """Opening balance + bookings == closing balance, per balance section
     (some statements list sub-accounts one after another). Returns the
@@ -299,7 +308,7 @@ def _check_balances(events: list[tuple[int, str, str]], lines: list[PDFParsedLin
     opening: tuple[int, int] | None = None
     for line_no, kind, amount_text in sorted(events):
         try:
-            amount = parse_amount_to_minor_units(amount_text)
+            amount = _amount_minor(amount_text)
         except AmountParseError:
             continue
         if kind == "open" or (kind == "?" and opening is None):
@@ -313,7 +322,7 @@ def _check_balances(events: list[tuple[int, str, str]], lines: list[PDFParsedLin
         if not members:
             continue
         try:
-            total = sum(parse_amount_to_minor_units(line.amount_text) for line in members)
+            total = sum(_amount_minor(line.amount_text) for line in members)
         except AmountParseError:
             return None, 0
         differences.append(closing_minor - opening_minor - total)
