@@ -38,6 +38,9 @@ export function useDashboardPeriod(): {
 } {
   const [stored, setStored] = useState<StoredPeriod>(() => {
     const value = load();
+    // A stored preset this version doesn't know (renamed since, or a damaged
+    // entry) has no range: the start page would fail on every load.
+    if (value.preset && !(value.preset in datePresets())) value.preset = undefined;
     return value.preset || value.start || value.end ? value : { ...value, preset: "This month" };
   });
 

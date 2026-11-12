@@ -253,12 +253,12 @@ Status wird hier fortgeschrieben.
 | Release-Workflow: `contents: write` ohne Tests, kein Abgleich Tag/Version; `curl \| sh` unversioniert; CI testet nur Erstinstallation | offen |
 | `--stop` ist unter Windows ein harter Kill (`os.kill(pid, SIGTERM)`) | offen |
 
-### Weitere kleine Frontend-Befunde aus dem Audit (alle offen)
+### Weitere kleine Frontend-Befunde aus dem Audit (offen, wenn nicht anders vermerkt)
 
-- `state/dashboardPeriod.ts`: ein unbekannter gespeicherter Preset-Name
-  (`datePresets()[stored.preset]` ist dann `undefined`) lässt die Startseite
-  bei jedem Laden abstürzen. Fix: `stored.preset in datePresets()` prüfen,
-  sonst "This month".
+- **Erledigt:** `state/dashboardPeriod.ts` — ein unbekannter gespeicherter
+  Preset-Name fällt auf "This month" zurück statt die Startseite abstürzen zu
+  lassen (`state/dashboardPeriod.test.ts`). Am 2026-11-12 noch uncommittet,
+  zusammen mit `CHANGELOG.md` und `handoff.md`.
 - `pages/Transactions.tsx`, `components/reports/MonthTransactions.tsx`: die
   Seite wird nicht begrenzt, wenn die Liste schrumpft ("Seite 3 von 2").
   `BreakdownTransactions.tsx` und `ReviewQueue.tsx` machen es schon richtig.

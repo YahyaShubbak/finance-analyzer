@@ -52,6 +52,8 @@ start — back up your data before updating).
 - When the credit cards, budgets, accounts or imports could not be loaded
   (the app stopped, an error), the page said there were none. It now says
   that loading failed, and offers to try again.
+- A remembered dashboard period this version doesn't know made the start
+  page fail on every load. It falls back to "This month".
 
 ### Changed
 - The transactions search filters once the typing pauses, not on every
