@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../i18n/useI18n";
 import type { MessageKey } from "../../i18n/core";
-import { Button, Card, EmptyState } from "../ui";
+import { Button, Card, EmptyState, ErrorState } from "../ui";
 import { ImportHistoryRow } from "./ImportHistoryRow";
 import { useImportHistory, useRemoveImports } from "../../hooks/useImports";
 import type { ImportRecord } from "../../types";
@@ -189,6 +189,9 @@ export function ImportHistory() {
             </table>
           </div>
         </div>
+      ) : history.isError && !history.data ? (
+        // not "no imports yet": they could not be loaded
+        <ErrorState error={history.error} onRetry={() => history.refetch()} />
       ) : (
         <EmptyState title={t("imports.emptyTitle")} description={t("imports.emptyBody")} />
       )}

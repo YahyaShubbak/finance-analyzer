@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Card, EmptyState, PageHeader } from "../components/ui";
+import { Button, Card, EmptyState, ErrorState, PageHeader } from "../components/ui";
 import { BudgetForm } from "../components/budgets/BudgetForm";
 import { BudgetProgressRow } from "../components/budgets/BudgetProgressRow";
 import { useBudgetStatus } from "../hooks/useBudgets";
@@ -80,7 +80,10 @@ export function Budgets() {
         </Card>
 
         <Card>
-          {status.data && status.data.items.length > 0 ? (
+          {status.isError && !status.data ? (
+            // not "no budgets": they could not be loaded
+            <ErrorState error={status.error} onRetry={() => status.refetch()} />
+          ) : status.data && status.data.items.length > 0 ? (
             status.data.items.map((item) => <BudgetProgressRow key={item.category} item={item} />)
           ) : (
             <EmptyState

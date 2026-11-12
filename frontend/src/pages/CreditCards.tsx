@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Card, EmptyState, PageHeader, ReconciliationStatusBadge } from "../components/ui";
+import { Card, EmptyState, ErrorState, PageHeader, ReconciliationStatusBadge } from "../components/ui";
 import { useCreditCards, useStatements } from "../hooks/useCreditCards";
 import { formatDate, formatMoney } from "../lib/format";
 import { formatAccountBalance } from "../lib/accountBalance";
@@ -9,13 +9,19 @@ import { useI18n } from "../i18n/useI18n";
 
 export function CreditCards() {
   const { t } = useI18n();
-  const { data: cards, isLoading } = useCreditCards();
+  const { data: cards, isLoading, isError, error, refetch } = useCreditCards();
 
   return (
     <div>
       <PageHeader title={t("cards.title")} subtitle={t("cards.subtitle")} />
       <div className="p-8 space-y-5">
-        {!isLoading && (!cards || cards.length === 0) && (
+        {/* not "no credit cards": they could not be loaded (the app stopped, an error) */}
+        {isError && !cards && (
+          <Card>
+            <ErrorState error={error} onRetry={() => refetch()} />
+          </Card>
+        )}
+        {!isLoading && !isError && (!cards || cards.length === 0) && (
           <Card>
             <EmptyState
               title={t("cards.emptyTitle")}

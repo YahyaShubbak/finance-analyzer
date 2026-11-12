@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useI18n } from "../i18n/useI18n";
-import { Card, EmptyState, PageHeader, Button } from "../components/ui";
+import { Card, EmptyState, ErrorState, PageHeader, Button } from "../components/ui";
 import { CreateAccountForm } from "../components/accounts/CreateAccountForm";
 import { AccountRow } from "../components/accounts/AccountRow";
 import { RecheckTransfersCard } from "../components/accounts/RecheckTransfersCard";
@@ -12,7 +12,7 @@ export function Accounts() {
   const [showArchived, setShowArchived] = useState(false);
   // Always load archived accounts too: otherwise an archived account could
   // never be found again to unarchive it.
-  const { data: allAccounts, refetch } = useAccounts(true);
+  const { data: allAccounts, refetch, isError, error } = useAccounts(true);
   const archivedCount = allAccounts?.filter((a) => a.is_archived).length ?? 0;
   const accounts = allAccounts?.filter((a) => showArchived || !a.is_archived) ?? [];
 
@@ -35,6 +35,8 @@ export function Accounts() {
         )}
 
         <Card>
+          {/* not an empty list: the accounts could not be loaded */}
+          {isError && !allAccounts && <ErrorState error={error} onRetry={() => refetch()} />}
           {allAccounts && allAccounts.length === 0 && (
             <EmptyState
               title={t("accounts.emptyTitle")}

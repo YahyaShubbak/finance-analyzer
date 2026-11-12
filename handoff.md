@@ -8,19 +8,19 @@ Tests und die Doku im Repo sind Englisch.
 
 Ein Architektur-Audit des Repos (Version 0.8.0) hat 15 größere Befunde
 (Nr. 1–15) und eine Tabelle kleiner „Quick Wins“ ergeben. Erledigt und
-getestet sind die Befunde 1–6 und 12 sowie ein Teil der Quick Wins (Abschnitt
-„Quick Wins“). Offen sind die Befunde 7–11 und 13–15 und der Rest der Quick Wins.
+getestet sind die Befunde 1–6, 12 und großteils 14 sowie ein Teil der Quick Wins (Abschnitt
+„Quick Wins“). Offen sind die Befunde 7–11, 13, 15, der Rest von 14 und der Rest der Quick Wins.
 
 Der Nutzer committet selbst. Die Befunde 1–6 stehen in Commit `68a370d`
 ("Harden imports, restores, and schema upgrades"); der Stand davor war
 `f0a3d0f`. Die neun erledigten Quick Wins sind ebenfalls committet (bis
-`7b5b058`). Befund 12 lag am 2026-11-12 noch uncommittet im Arbeitsverzeichnis
-(Commit-Message im Chat des Nutzers): `backend/app/services/reset_service.py`,
-`backup_service.py`, `import_staging.py`, `backend/app/api/routes/imports.py`,
-`backend/tests/test_backup_restore.py`, `test_review_groups_and_reset.py`,
-`README.md`, `CHANGELOG.md`, `handoff.md`. Vor neuer Arbeit mit `git status`
-prüfen, ob das inzwischen committet ist — wenn nicht, den Nutzer darauf
-hinweisen und diese Dateien nicht anfassen.
+`7b5b058`), Befund 12 in `899e8b4`. Befund 14 lag am 2026-11-12 noch
+uncommittet im Arbeitsverzeichnis (Commit-Message im Chat des Nutzers):
+`frontend/src/pages/CreditCards.tsx`, `Budgets.tsx`, `Accounts.tsx`,
+`loadErrors.test.tsx`, `frontend/src/components/imports/ImportHistory.tsx`,
+`CHANGELOG.md`, `handoff.md`. Vor neuer Arbeit mit `git status` prüfen, ob das
+inzwischen committet ist — wenn nicht, den Nutzer darauf hinweisen und diese
+Dateien nicht anfassen.
 
 ## Arbeitsweise, die der Nutzer erwartet
 
@@ -208,13 +208,18 @@ Funktionsnamen sind verlässlich.
 - Es gibt jetzt `ImportFileCard.test.tsx` (echte Hooks, gestubbte
   API-Module) als Vorlage für weitere Tests.
 
-### 14. Fehlgeschlagene Abfragen erscheinen als „keine Daten“
-- Wo: `pages/CreditCards.tsx`, `pages/Budgets.tsx`,
-  `components/imports/ImportHistory.tsx`, `pages/Accounts.tsx`,
-  `pages/Overview.tsx`, `components/settings/BackupSection.tsx`,
-  `LearnedRulesSection.tsx`.
-- Fix: `isError`-Zweig mit dem vorhandenen `ErrorState`
-  (`components/ui/index.tsx`).
+### 14. Fehlgeschlagene Abfragen erscheinen als „keine Daten“ — teilweise erledigt
+- Erledigt: `pages/CreditCards.tsx`, `pages/Budgets.tsx`, `pages/Accounts.tsx`
+  und `components/imports/ImportHistory.tsx` zeigen `ErrorState` mit
+  „Erneut versuchen“, wenn die Abfrage fehlschlägt und keine (alten) Daten da
+  sind (`isError && !data`). Test: `pages/loadErrors.test.tsx`.
+- Offen: `pages/Overview.tsx` (monatliche Reihe, Kategorien, Konten zeigen bei
+  einem Fehler „nicht genug Daten“) sowie
+  `components/settings/BackupSection.tsx` und `LearnedRulesSection.tsx`
+  (rendern bei einem Fehler nichts). Gleiches Muster anwenden.
+- Falle beim Testen: `beforeEach(() => mock.mockReset())` ohne geschweifte
+  Klammern gibt die Mock-Funktion zurück; Vitest ruft sie als Aufräum-Funktion
+  auf und der Test scheitert an deren Rückgabewert.
 
 ### 15. Installer: Datenordner-Wechsel und Update bei laufender App
 - Wo: Abschnitt „data folder“ in `install.ps1` / `install.sh`.

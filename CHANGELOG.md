@@ -49,6 +49,9 @@ start — back up your data before updating).
   deleted now: the imports' stored originals, and backups. On start-up,
   only working folders with the app's own name are cleaned away — no longer
   any folder starting with "tmp" that holds a `finance.db`.
+- When the credit cards, budgets, accounts or imports could not be loaded
+  (the app stopped, an error), the page said there were none. It now says
+  that loading failed, and offers to try again.
 
 ### Changed
 - The transactions search filters once the typing pauses, not on every
