@@ -18,12 +18,15 @@ export function CurrencySection({
   currency,
   totals,
   monthly,
+  monthlyFailed,
   categories,
   renderCategories,
 }: {
   currency: string;
   totals: CurrencyTotals;
   monthly: MonthlyPoint[];
+  /** shown instead of the chart: the months could not be loaded */
+  monthlyFailed?: ReactNode;
   categories: CategoryBreakdownItem[];
   renderCategories: (categories: CategoryBreakdownItem[], currency: string) => ReactNode;
 }) {
@@ -42,11 +45,11 @@ export function CurrencySection({
 
       <Card className="p-5">
         <h2 className="text-sm font-semibold text-ink mb-4">{t("stats.incomeVsExpensesCur", { currency })}</h2>
-        {monthlyForCurrency.length > 0 ? (
+        {monthlyFailed ?? (monthlyForCurrency.length > 0 ? (
           <IncomeExpenseChart data={monthlyForCurrency} currency={currency} />
         ) : (
           <EmptyState title={t("stats.notEnough")} />
-        )}
+        ))}
       </Card>
 
       {renderCategories(categoriesForCurrency, currency)}

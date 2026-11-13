@@ -59,6 +59,14 @@ export function Overview() {
   const shownMonth = selectedMonth ? monthly.data?.find((p) => p.month === selectedMonth.month) ?? null : null;
 
   // Spending per category; choosing one lists its transactions right below.
+  // A part of the page that could not be loaded says so (with "try again") —
+  // it does not claim that there is nothing, or not enough, to show.
+  function failed(part: { isError: boolean; data: unknown; error: unknown; refetch: () => unknown }) {
+    return part.isError && part.data === undefined ? (
+      <ErrorState error={part.error} onRetry={() => void part.refetch()} />
+    ) : null;
+  }
+
   function renderCategories(items: CategoryBreakdownItem[], currency: string, title: string) {
     const current = selected?.currency === currency && items.some((c) => c.category === selected.category)
       ? selected.category
@@ -67,7 +75,7 @@ export function Overview() {
       <>
         <Card className="p-5">
           <h2 className="text-sm font-semibold text-ink mb-1">{title}</h2>
-          {items.length > 0 ? (
+          {failed(categories) ?? (items.length > 0 ? (
             <CategoryBreakdownList
               data={items}
               currency={currency}
@@ -76,7 +84,7 @@ export function Overview() {
             />
           ) : (
             <EmptyState title={t("stats.noExpenses")} />
-          )}
+          ))}
         </Card>
         {current && (
           <CategoryTransactions
@@ -138,6 +146,7 @@ export function Overview() {
                     currency={c.currency}
                     totals={c}
                     monthly={monthly.data ?? []}
+                    monthlyFailed={failed(monthly)}
                     categories={categories.data ?? []}
                     renderCategories={(items, currency) =>
                       renderCategories(items, currency, t("stats.byCategoryCur", { currency }))
@@ -156,7 +165,7 @@ export function Overview() {
 
                 <Card className="p-5">
                   <h2 className="text-sm font-semibold text-ink mb-4">{t("stats.overTime")}</h2>
-                  {monthly.data && monthly.data.length > 0 ? (
+                  {failed(monthly) ?? (monthly.data && monthly.data.length > 0 ? (
                     <>
                       <IncomeExpenseChart
                         data={monthly.data}
@@ -172,7 +181,7 @@ export function Overview() {
                     </>
                   ) : (
                     <EmptyState title={t("stats.notEnough")} />
-                  )}
+                  ))}
                 </Card>
 
                 {shownMonth && (
@@ -196,7 +205,7 @@ export function Overview() {
               <div className="px-5 py-4 border-b border-border">
                 <h2 className="text-sm font-semibold text-ink">{t("reports.accountBreakdown")}</h2>
               </div>
-              {accounts.data && accounts.data.length > 0 ? (
+              {failed(accounts) ?? (accounts.data && accounts.data.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="text-ink-muted text-xs">
@@ -240,7 +249,7 @@ export function Overview() {
                 <div className="px-5 py-6">
                   <EmptyState title={t("reports.noActivity")} />
                 </div>
-              )}
+              ))}
             </Card>
 
             {transfers.data && transfers.data.transfer_count > 0 && (
@@ -331,7 +340,7 @@ export function Overview() {
               <p className="text-xs text-ink-muted mb-4">
                 {t("reports.forecastHint")}
               </p>
-              {forecast.data && forecast.data.points.length > 0 ? (
+              {failed(forecast) ?? (forecast.data && forecast.data.points.length > 0 ? (
                 // One chart per currency — amounts in different currencies are never added up.
                 <div className="space-y-5">
                   {[...new Set(forecast.data.points.map((p) => p.currency))].map((currency, _i, all) => (
@@ -346,7 +355,7 @@ export function Overview() {
                 </div>
               ) : (
                 <EmptyState title={t("stats.notEnough")} />
-              )}
+              ))}
             </Card>
           </>
         )}
