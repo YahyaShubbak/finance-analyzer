@@ -25,6 +25,29 @@ start — back up your data before updating).
   the next opens when it is closed.
 - A file removed from the page while it was still being uploaded stayed in
   the app's staging folder for up to a day. It is discarded right away.
+- Choosing another data folder in the installer only changed the setting:
+  the data stayed in the old folder and the app started empty, as if
+  everything was gone. The installer now says so and asks before it
+  switches to a folder without data (and stops when it can't ask).
+- Updating while the app was running: on Windows the installer replaced
+  packages the running app held open and could leave a broken environment.
+  The installer now notices the running app and offers to stop it first.
+- `./run.sh --stop` on Windows cut the app off in the middle of whatever it
+  was doing. The app is now asked to end itself, as on Ctrl+C; only one
+  that does not answer is ended from outside.
+- Parts of the overview that could not be loaded (the months, the
+  categories, the accounts, the forecast) said "not enough data" or "no
+  expenses". They now say that loading failed, with "Try again".
+- A category that was in use but had never been created (typed in with an
+  older version) appeared in no list and could not be renamed or removed.
+  It is now one of your own categories in Settings.
+- The value of bonus points was always shown in euros. It is shown in the
+  currency of the card the points belong to.
+- One click on "Remove" deleted a budget. It asks first now.
+- Archiving an account that failed said nothing. The reason is shown.
+- A click beside the bars of the income/expense chart chose the first month.
+- Assigning categories quickly one after the other: when the first one
+  failed, nothing said so.
 - Running the installer again removed settings added to `finance.env` by
   hand (`FINANCE_HOST`, `FINANCE_IMPORTS_DIR`, `FINANCE_BACKUPS_DIR`, ...),
   so after an update the app looked for backups and originals in another
@@ -85,6 +108,15 @@ start — back up your data before updating).
 - Of many files dropped at once, two are uploaded and read at a time; the
   others wait for their turn.
 - Dropped files go on being read while another page is shown.
+- Of the backups the app makes right before a restore, the newest three are
+  kept (each holds every original document; they used to pile up).
+- In the import review of a long file, moving the mouse over the bookings
+  no longer redraws every row.
+- A search that was replaced by a newer one is given up instead of answered
+  for nothing, and a request the server refused is not sent a second time.
+- `install.sh` downloads a named version of uv when it installs it.
+- A release is only published after all checks passed, and only when its
+  tag is the version the app reports.
 - Which booking a row stands for that was skipped as a duplicate (the same
   purchase in a card's statement and in its export) is now a checked
   reference in the database instead of a note inside the row's extra
@@ -92,6 +124,9 @@ start — back up your data before updating).
   upgraded on the first start (a copy is kept, see below).
 
 ### Added
+- `./run.sh --status` (Windows: `run.bat --status`) says whether the app is
+  running.
+- Backups can be deleted in Settings (after a confirmation).
 - Before the database schema is upgraded on start-up, a copy of the
   database is kept in the backups folder (`pre-upgrade-….db`, the newest
   three): an upgrade that stops half-way can't be undone by SQLite itself.
