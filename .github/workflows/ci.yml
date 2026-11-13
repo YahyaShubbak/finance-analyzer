@@ -4,6 +4,7 @@ on:
   push:
     branches: [master]
   pull_request:
+  workflow_call:  # the release runs all of this first
 
 permissions:
   contents: read
@@ -128,6 +129,24 @@ jobs:
           curl -fsS http://localhost:8431/ | grep -q '<div id="root">'
           curl -fsS http://127.0.0.1:8431/transactions | grep -q '<div id="root">'
           test -f "$RUNNER_TEMP/data dir/finance.db"
+      - name: Update while the app is running
+        run: |
+          # as after `git pull`: the installer finds the app running, stops it, installs again
+          extra=""; [ "${{ matrix.variant }}" = pip ] && extra="--no-uv"
+          ./install.sh --yes --port 8431 $extra
+          if curl -fsS http://127.0.0.1:8431/health; then echo "the app was not stopped for the update"; exit 1; fi
+          grep -q "data dir" finance.env  # the settings are kept
+          nohup ./run.sh --no-open > "$RUNNER_TEMP/run.log" 2>&1 &
+          for i in $(seq 30); do curl -fsS http://127.0.0.1:8431/health && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8431/health
+      - name: Refuse to switch to an empty data folder without being asked
+        run: |
+          extra=""; [ "${{ matrix.variant }}" = pip ] && extra="--no-uv"
+          if ./install.sh --yes --data-dir "$RUNNER_TEMP/other" --port 8431 $extra; then
+            echo "switched to an empty data folder: the app would start without the user's data"; exit 1
+          fi
+          grep -q "data dir" finance.env
+          test ! -e "$RUNNER_TEMP/other"
       - if: failure()
         run: cat "$RUNNER_TEMP/run.log" || true
 
@@ -168,3 +187,26 @@ jobs:
           if ($index.Content -notmatch '<div id="root">') { throw "SPA fallback missing" }
           if (-not (Test-Path "$env:RUNNER_TEMP\data dir (test)\finance.db")) { throw "database not created in the chosen folder" }
           Get-Content finance.env
+      - name: Update while the app is running, and refuse an empty data folder
+        shell: pwsh
+        run: |
+          function Test-App { try { Invoke-RestMethod http://127.0.0.1:8431/health | Out-Null; return $true } catch { return $false } }
+          function Start-App {
+            Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "run.bat", "--no-open" -WindowStyle Hidden
+            foreach ($i in 1..30) { if (Test-App) { return }; Start-Sleep 1 }
+            throw "backend did not start"
+          }
+          if (-not (Test-App)) { Start-App }  # (the one of the step before may have ended with it)
+          $extra = @(); if ("${{ matrix.variant }}" -eq "pip") { $extra = @("-NoUv") }
+
+          # as after `git pull`: the installer finds the app running, stops it, installs again
+          cmd /c install.bat -Yes -Port 8431 @extra
+          if ($LASTEXITCODE -ne 0) { throw "the update over a running app failed" }
+          if (Test-App) { throw "the app was not stopped for the update" }
+          if (-not (Select-String -Path finance.env -Pattern "data dir \(test\)" -Quiet)) { throw "the settings were not kept" }
+          Start-App
+
+          cmd /c install.bat -Yes -DataDir "$env:RUNNER_TEMP\other" -Port 8431 @extra
+          if ($LASTEXITCODE -eq 0) { throw "switched to an empty data folder: the app would start without the user's data" }
+          if (-not (Select-String -Path finance.env -Pattern "data dir \(test\)" -Quiet)) { throw "the data folder was changed" }
+          if (Test-Path "$env:RUNNER_TEMP\other") { throw "the refused folder was created" }

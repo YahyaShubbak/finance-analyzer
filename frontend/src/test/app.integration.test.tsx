@@ -36,7 +36,7 @@
  * independent of whatever else is in the DB).
  */
 import { describe, it, expect, beforeAll, vi } from "vitest";
-import { render, screen, within, waitFor } from "@testing-library/react";
+import { configure, render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -46,6 +46,11 @@ import { LanguageProvider } from "../i18n/LanguageProvider";
 
 const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
 const API_BASE = env.E2E_API_BASE ?? "";
+
+// A page is loaded when it is first shown (App.tsx: lazy), and what it shows comes from a real
+// server: the default second to wait was now and then too short for the very first page —
+// "Dashboard opens successfully" failed about one run in ten.
+configure({ asyncUtilTimeout: 10_000 });
 const CLIENT_HEADER = { "X-Finance-Client": "1" };
 const RUN_ID = Date.now();
 const ACCOUNT_NAME = `E2E Test Account ${RUN_ID}`;
