@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, func, select
 
 from app.db.models import Budget, CategoryRule, CustomCategory, Transaction
@@ -45,8 +46,34 @@ def _usage(session: Session) -> dict[str, int]:
     return {category: count for category, count in rows if category}
 
 
+def _adopt_used_names(session: Session, usage: dict[str, int]) -> None:
+    """A category that is in use but was never created — typed in with an
+    older version (before categories could be created), or sent to the API
+    directly — becomes one of the user's categories. It can then be chosen,
+    renamed and deleted like the others, instead of living on in bookings,
+    rules and budgets where nothing reaches it. (Of two spellings that
+    differ only in case, the one used most.)"""
+    known = {name.casefold() for name in BUILT_IN_CATEGORIES}
+    known |= {name.casefold() for name in session.exec(select(CustomCategory.name)).all()}
+    used = sorted(usage, key=lambda name: (-usage[name], name))
+    used += sorted(set(session.exec(select(CategoryRule.category)).all()) | set(session.exec(select(Budget.category)).all()))
+    adopted = False
+    for name in used:
+        if name and name.strip() and name.casefold() not in known:
+            known.add(name.casefold())
+            session.add(CustomCategory(name=name))
+            adopted = True
+    if not adopted:
+        return
+    try:
+        session.commit()
+    except IntegrityError:  # another request adopted them at the same moment
+        session.rollback()
+
+
 def list_categories(session: Session) -> list[CategoryInfo]:
     usage = _usage(session)
+    _adopt_used_names(session, usage)
     custom = session.exec(select(CustomCategory).order_by(CustomCategory.name)).all()
     return [CategoryInfo(name, True, None, usage.get(name, 0)) for name in BUILT_IN_CATEGORIES] + [
         CategoryInfo(c.name, False, c.id, usage.get(c.name, 0)) for c in custom

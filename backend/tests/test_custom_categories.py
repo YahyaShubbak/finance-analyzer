@@ -71,3 +71,34 @@ def test_names_are_checked(client):
     other = client.post("/api/categories", json={"name": "Schulden"}).json()
     assert client.delete(f"/api/categories/{other['id']}", params={"replacement": "Nope"}).status_code == 422
     assert client.delete("/api/categories/99999").status_code == 404
+
+
+def test_a_category_that_is_used_but_was_never_created_becomes_one_of_the_users(client):
+    """Typed in with an older version, or sent to the API directly: it lived
+    on in bookings, rules and budgets — in no list, never to be renamed or
+    removed. Now it is a category like the ones the user created."""
+    tx = _setup(client)[-300]["id"]
+    assert client.patch(f"/api/transactions/{tx}", json={"category": "Dates"}).status_code == 200
+    assert client.put("/api/budgets/Haus/Garten", json={"amount_minor": 5000}).status_code == 200
+
+    listed = {c["name"]: c for c in client.get("/api/categories").json()}
+    assert listed["Dates"]["built_in"] is False and listed["Dates"]["id"] is not None
+    assert listed["Dates"]["transaction_count"] == 1
+    assert listed["Haus/Garten"]["id"] is not None  # used by a budget only
+    again = {c["name"]: c["id"] for c in client.get("/api/categories").json()}
+    assert again["Dates"] == listed["Dates"]["id"] and len(again) == len(listed)  # adopted once
+
+    # ... and can be renamed and deleted like any other
+    assert client.patch(f"/api/categories/{listed['Dates']['id']}", json={"name": "Ausgehen"}).status_code == 200
+    assert {t["id"]: t["category"] for t in client.get("/api/transactions").json()["items"]}[tx] == "Ausgehen"
+    removed = client.delete(f"/api/categories/{listed['Dates']['id']}", params={"replacement": "Groceries"})
+    assert removed.status_code == 200 and removed.json() == {"transactions_moved": 1}
+    assert "Ausgehen" not in {c["name"] for c in client.get("/api/categories").json()}
+
+
+def test_a_built_in_category_in_another_spelling_is_not_adopted(client):
+    tx = _setup(client)[-300]["id"]
+    assert client.patch(f"/api/transactions/{tx}", json={"category": "groceries"}).status_code == 200
+
+    names = [c["name"] for c in client.get("/api/categories").json()]
+    assert "groceries" not in names and "Groceries" in names
