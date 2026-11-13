@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { Button } from "../ui";
 import { stagedPageUrl } from "../../api/imports";
@@ -214,12 +214,26 @@ export function ImportReview({
   );
   const unreadable = preview.layout_lines.filter((line) => line.role === "unreadable").length;
 
-  function select(index: number, fromOriginal: boolean) {
+  // The same functions on every render: a row that is neither the one
+  // selected before nor the one selected now is not drawn again (see
+  // BookingRow, SourceRow) — moving the mouse over a long file selects a
+  // row with every step.
+  const selectInTable = useCallback(
+    (index: number) => {
+      setSelected(index);
+      const tx = bookingsByIndex.get(index);
+      if (tx && isPdfBox(tx.location)) setPage(tx.location.page);
+    },
+    [bookingsByIndex]
+  );
+  const selectInOriginal = useCallback((index: number) => {
     setSelected(index);
-    const tx = bookingsByIndex.get(index);
-    if (!fromOriginal && tx && isPdfBox(tx.location)) setPage(tx.location.page);
-    if (fromOriginal) rowRefs.current.get(index)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }
+    rowRefs.current.get(index)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, []);
+  const registerRow = useCallback((index: number, row: HTMLElement | null) => {
+    if (row) rowRefs.current.set(index, row);
+    else rowRefs.current.delete(index);
+  }, []);
 
   const check = preview.total_check;
   return (
@@ -321,14 +335,14 @@ export function ImportReview({
                     zoom={zoom}
                     lines={preview.layout_lines.filter((line) => line.page === page)}
                     selected={teach ? picked?.index ?? null : selected}
-                    onSelect={(index) => select(index, true)}
+                    onSelect={selectInOriginal}
                     teach={teach ? { styleOf: teachStyle, onPick: setPicked } : undefined}
                   />
                 </div>
                 <Legend teach={teach} />
               </>
             ) : (
-              <SourceRows rows={preview.source_rows} transactions={preview.transactions} selected={selected} onSelect={(i) => select(i, true)} />
+              <SourceRows rows={preview.source_rows} transactions={preview.transactions} selected={selected} onSelect={selectInOriginal} />
             )}
           </section>
 
@@ -371,40 +385,13 @@ export function ImportReview({
                 </thead>
                 <tbody>
                   {preview.transactions.map((tx) => (
-                    <tr
+                    <BookingRow
                       key={tx.source_row_index}
-                      ref={(el) => {
-                        if (el) rowRefs.current.set(tx.source_row_index, el);
-                        else rowRefs.current.delete(tx.source_row_index);
-                      }}
-                      tabIndex={0}
-                      aria-selected={selected === tx.source_row_index}
-                      onClick={() => select(tx.source_row_index, false)}
-                      onFocus={() => select(tx.source_row_index, false)}
-                      onMouseEnter={() => select(tx.source_row_index, false)}
-                      className={clsx(
-                        "border-b border-border cursor-pointer outline-none",
-                        selected === tx.source_row_index ? "bg-accent-soft" : "hover:bg-surface-sunken/60"
-                      )}
-                    >
-                      <td className="px-4 py-1.5 whitespace-nowrap text-ink-muted">
-                        {tx.parsed_date ? formatDate(tx.parsed_date) : <span className="text-warning">{tx.original_date_text ?? "—"}</span>}
-                      </td>
-                      <td className="px-4 py-1.5 text-ink">
-                        {tx.original_description ?? "—"}
-                        {tx.details && <span className="block text-xs text-ink-faint">{tx.details}</span>}
-                      </td>
-                      <td
-                        className={clsx(
-                          "px-4 py-1.5 text-right tabular-nums whitespace-nowrap",
-                          tx.parsed_amount_minor === null ? "text-warning" : tx.parsed_amount_minor < 0 ? "text-expense" : "text-income"
-                        )}
-                      >
-                        {tx.parsed_amount_minor === null
-                          ? tx.original_amount_text ?? "—"
-                          : formatSignedMoney(tx.parsed_amount_minor, tx.parsed_currency ?? "EUR")}
-                      </td>
-                    </tr>
+                      tx={tx}
+                      active={selected === tx.source_row_index}
+                      onSelect={selectInTable}
+                      register={registerRow}
+                    />
                   ))}
                 </tbody>
               </table>
@@ -436,6 +423,50 @@ export function ImportReview({
     </div>
   );
 }
+
+/** One booking of the table on the right. */
+const BookingRow = memo(function BookingRow({
+  tx,
+  active,
+  onSelect,
+  register,
+}: {
+  tx: ParsedTransactionPreview;
+  active: boolean;
+  onSelect: (index: number) => void;
+  register: (index: number, row: HTMLElement | null) => void;
+}) {
+  const index = tx.source_row_index;
+  return (
+    <tr
+      ref={(row) => register(index, row)}
+      tabIndex={0}
+      aria-selected={active}
+      onClick={() => onSelect(index)}
+      onFocus={() => onSelect(index)}
+      onMouseEnter={() => onSelect(index)}
+      className={clsx("border-b border-border cursor-pointer outline-none", active ? "bg-accent-soft" : "hover:bg-surface-sunken/60")}
+    >
+      <td className="px-4 py-1.5 whitespace-nowrap text-ink-muted">
+        {tx.parsed_date ? formatDate(tx.parsed_date) : <span className="text-warning">{tx.original_date_text ?? "—"}</span>}
+      </td>
+      <td className="px-4 py-1.5 text-ink">
+        {tx.original_description ?? "—"}
+        {tx.details && <span className="block text-xs text-ink-faint">{tx.details}</span>}
+      </td>
+      <td
+        className={clsx(
+          "px-4 py-1.5 text-right tabular-nums whitespace-nowrap",
+          tx.parsed_amount_minor === null ? "text-warning" : tx.parsed_amount_minor < 0 ? "text-expense" : "text-income"
+        )}
+      >
+        {tx.parsed_amount_minor === null
+          ? tx.original_amount_text ?? "—"
+          : formatSignedMoney(tx.parsed_amount_minor, tx.parsed_currency ?? "EUR")}
+      </td>
+    </tr>
+  );
+});
 
 /** A PDF page as an image with a box on every line the reading used. */
 function PdfPage({
@@ -536,8 +567,11 @@ function SourceRows({
   selected: number | null;
   onSelect: (index: number) => void;
 }) {
-  const byRow = new Map<number, number>();
-  for (const tx of transactions) if (tx.location && "row" in tx.location) byRow.set(tx.location.row, tx.source_row_index);
+  const byRow = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const tx of transactions) if (tx.location && "row" in tx.location) map.set(tx.location.row, tx.source_row_index);
+    return map;
+  }, [transactions]);
   const selectedRef = useRef<HTMLTableRowElement>(null);
   useEffect(() => selectedRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }), [selected]);
   if (rows.length === 0) return null;
@@ -557,27 +591,39 @@ function SourceRows({
           {rows.slice(1).map((row, i) => {
             const index = byRow.get(i + 1);
             const active = index !== undefined && index === selected;
-            return (
-              <tr
-                key={i}
-                ref={active ? selectedRef : undefined}
-                onClick={() => index !== undefined && onSelect(index)}
-                className={clsx(
-                  "border-b border-border",
-                  index === undefined ? "text-ink-faint" : "cursor-pointer",
-                  active && "bg-accent-soft"
-                )}
-              >
-                {row.map((cell, j) => (
-                  <td key={j} className="px-2 py-1 whitespace-nowrap max-w-[260px] truncate" title={cell}>
-                    {cell}
-                  </td>
-                ))}
-              </tr>
-            );
+            return <SourceRow key={i} row={row} index={index} active={active} activeRef={active ? selectedRef : undefined} onSelect={onSelect} />;
           })}
         </tbody>
       </table>
     </div>
   );
 }
+
+/** One row of the spreadsheet; `index`: the booking it became, if any. */
+const SourceRow = memo(function SourceRow({
+  row,
+  index,
+  active,
+  activeRef,
+  onSelect,
+}: {
+  row: string[];
+  index: number | undefined;
+  active: boolean;
+  activeRef: React.Ref<HTMLTableRowElement> | undefined;
+  onSelect: (index: number) => void;
+}) {
+  return (
+    <tr
+      ref={activeRef}
+      onClick={() => index !== undefined && onSelect(index)}
+      className={clsx("border-b border-border", index === undefined ? "text-ink-faint" : "cursor-pointer", active && "bg-accent-soft")}
+    >
+      {row.map((cell, j) => (
+        <td key={j} className="px-2 py-1 whitespace-nowrap max-w-[260px] truncate" title={cell}>
+          {cell}
+        </td>
+      ))}
+    </tr>
+  );
+});
