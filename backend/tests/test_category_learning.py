@@ -232,3 +232,31 @@ def test_a_lesson_loads_only_the_bookings_it_could_apply_to(client):
 
     assert r.status_code == 200 and r.json()["applied_to"] == 1
     assert len(set(loaded)) < 10  # the two kiosk bookings — not all 62
+
+
+def test_the_list_of_learned_rules_counts_their_bookings_once_per_state_of_the_data(client, monkeypatch):
+    """Every rule against every booking: not again each time Settings is opened."""
+    from app.services import rule_service
+
+    account = _account(client)
+    _import(client, account, [
+        "2026-03-01,REWE Markt GmbH Einkauf,-12.00",
+        "2026-03-05,REWE Markt GmbH Einkauf,-8.00",
+        "2026-03-07,Kiosk am Bahnhof,-3.00",
+    ], "march.csv")
+    tx = _by_amount(client)
+    assert client.post(f"/api/transactions/{tx[-1200]['id']}/category-rule", json={"category": "Groceries"}).status_code == 200
+
+    counted = []
+    real = rule_service._learned_rule_matches
+    monkeypatch.setattr(rule_service, "_learned_rule_matches", lambda session: counted.append(1) or real(session))
+
+    first = client.get("/api/rules/category").json()
+    assert [(r["category"], r["matching_transactions"]) for r in first] == [("Groceries", 2)]
+    assert client.get("/api/rules/category").json() == first
+    assert counted == [1]
+
+    # ... and anew once the data changed
+    assert client.patch(f"/api/transactions/{tx[-300]['id']}", json={"category": "Shopping"}).status_code == 200
+    assert client.get("/api/rules/category").json() == first
+    assert counted == [1, 1]

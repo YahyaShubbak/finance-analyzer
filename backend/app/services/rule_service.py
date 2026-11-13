@@ -31,7 +31,7 @@ from app.db.models import (
 
 # (at import time, not when first used: importing it registers the SQL function fold() for
 # every database connection opened from then on - _could_contain relies on it)
-from app.db.session import fold_text
+from app.db.session import fold_text, remembered
 from app.i18n import tr
 from app.normalization.category import (
     CARD_ACCOUNT_EXCLUDED,
@@ -257,23 +257,31 @@ class LearnedRule:
     matching_transactions: int
 
 
-def list_learned_category_rules(session: Session) -> list[LearnedRule]:
-    rules = session.exec(
-        select(CategoryRule).where(CategoryRule.is_user_defined == True)  # noqa: E712
-        .order_by(CategoryRule.category, CategoryRule.pattern)
-    ).all()
+def _learned_rule_matches(session: Session) -> dict[int, int]:
+    """How many bookings each learned rule matches (every rule against every booking)."""
+    rules = session.exec(select(CategoryRule).where(CategoryRule.is_user_defined == True)).all()  # noqa: E712
     rows = session.exec(
         select(Transaction.merchant, RawTransaction.original_description, Transaction.amount_minor)
         .join(RawTransaction, RawTransaction.id == Transaction.raw_transaction_id)
     ).all()
     texts = [f"{merchant or ''}\n{description or ''}".lower() for merchant, description, _amount in rows]
-    return [
-        LearnedRule(rule, sum(
+    return {
+        rule.id: sum(
             1 for (merchant, description, amount), text in zip(rows, texts, strict=True)
             if rule_could_match(rule, text) and rule_matches(rule, merchant, description, amount)
-        ))
+        )
         for rule in rules
-    ]
+    }
+
+
+def list_learned_category_rules(session: Session) -> list[LearnedRule]:
+    rules = session.exec(
+        select(CategoryRule).where(CategoryRule.is_user_defined == True)  # noqa: E712
+        .order_by(CategoryRule.category, CategoryRule.pattern)
+    ).all()
+    # counted once per state of the data, not each time Settings is opened
+    matches = remembered(session, "learned_rule_matches", lambda: _learned_rule_matches(session))
+    return [LearnedRule(rule, matches.get(rule.id, 0)) for rule in rules]
 
 
 def forget_category_rule(session: Session, rule_id: int) -> int:
