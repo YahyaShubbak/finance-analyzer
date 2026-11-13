@@ -172,3 +172,15 @@ def test_points_reach_bookings_that_came_from_the_export_first(client, tmp_path)
         (settings.data_dir / POINTS_MARKER).unlink(missing_ok=True)
         backfill_points(session)
     assert points() == [5, 10, 40]
+
+
+def test_a_points_value_is_in_the_cards_currency(client, tmp_path):
+    """Not always euros: the statements of a Swiss card count in francs."""
+    card = client.post("/api/accounts", json={"name": "Karte", "account_type": "credit_card", "currency": "CHF"}).json()["id"]
+    path = write_text_pdf(tmp_path / "karte.pdf", STATEMENT)
+    preview = client.post("/api/imports/preview", data={"account_id": card},
+                          files={"file": ("karte.pdf", io.BytesIO(path.read_bytes()), "application/pdf")}).json()
+    assert client.post("/api/imports/commit", json={"staging_id": preview["staging_id"], "account_id": card}).status_code == 200
+
+    [program] = client.get("/api/points").json()
+    assert program["currency"] == "CHF" and program["balance_value_minor"] == 555

@@ -11,14 +11,22 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date
 
 from sqlmodel import Session, delete, func, select
 
 from app.config import settings
 from app.db.chunks import chunked
-from app.db.models import ImportRecord, ImportStatus, PointsEntry, PointsProgram, RawTransaction, Transaction
+from app.db.models import (
+    Account,
+    ImportRecord,
+    ImportStatus,
+    PointsEntry,
+    PointsProgram,
+    RawTransaction,
+    Transaction,
+)
 from app.importers.base import ParsedImport, ParseOptions
 from app.services.import_reading import parse_file
 from app.services.import_staging import stored_import_path
@@ -180,6 +188,16 @@ def points_overview(session: Session) -> list[dict]:
 
         earned = sum(e.points for e in flows if e.kind == "earned")
         redeemed = sum(e.points for e in flows if e.kind == "redeemed")
+
+        # What a point is worth is money of the card its statements belong to
+        # (most of them, should a program ever span cards in two currencies).
+        accounts = (
+            session.get(Account, record.account_id)
+            for record in (session.get(ImportRecord, i) for i in {e.import_id for e in entries})
+            if record is not None and record.account_id is not None
+        )
+        currencies = Counter(account.currency for account in accounts if account is not None)
+        currency = currencies.most_common(1)[0][0] if currencies else "EUR"
         year_earned = sum(e.points for e in flows if e.kind == "earned" and e.entry_date.year == today.year)
         year_redeemed = sum(e.points for e in flows if e.kind == "redeemed" and e.entry_date.year == today.year)
 
@@ -232,6 +250,7 @@ def points_overview(session: Session) -> list[dict]:
             "unit": program.unit,
             "value_per_100": program.value_per_100,
             "value_set_by_user": program.value_set_by_user,
+            "currency": currency,
             "balance": balance,
             "balance_value_minor": round(balance * program.value_per_100 / 100),
             "balance_stated": anchor is not None,

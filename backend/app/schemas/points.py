@@ -40,6 +40,7 @@ class PointsProgramSummary(BaseModel):
     unit: str
     value_per_100: int  # cents that 100 points are worth
     value_set_by_user: bool
+    currency: str = "EUR"  # ... of the card the program's statements belong to
     balance: int
     balance_value_minor: int
     balance_stated: bool  # from a statement's stated balance (else: the sum of what was read)
