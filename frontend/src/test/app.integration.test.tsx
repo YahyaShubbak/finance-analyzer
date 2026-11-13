@@ -267,9 +267,14 @@ describe.skipIf(!API_BASE)("Real app against a real (throwaway) backend", () => 
     // the seeded data is from June 2026.
     await user.click(screen.getByRole("button", { name: "All time" }));
 
-    await waitFor(() => expect(screen.getByText("Income")).toBeInTheDocument());
-    expect(screen.getByText("Expenses")).toBeInTheDocument();
+    // (getAllBy: the table of accounts below has columns of the same names — whether it is
+    // there yet depends on which answer arrives first; with getBy the test passed only as
+    // long as the totals came before it)
+    await waitFor(() => expect(screen.getAllByText("Income").length).toBeGreaterThan(0));
+    expect(screen.getAllByText("Expenses").length).toBeGreaterThan(0);
     expect(screen.getByText("Net cash flow")).toBeInTheDocument();
+    // ... and the accounts with their figures arrive, too
+    await waitFor(() => expect(screen.getAllByText("Income").length).toBeGreaterThan(1));
 
     // Recharts renders its responsive container and feeds it real data;
     // full SVG painting requires real layout (ResizeObserver/getBoundingClientRect),

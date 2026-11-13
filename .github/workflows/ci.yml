@@ -210,3 +210,4 @@ jobs:
           if ($LASTEXITCODE -eq 0) { throw "switched to an empty data folder: the app would start without the user's data" }
           if (-not (Select-String -Path finance.env -Pattern "data dir \(test\)" -Quiet)) { throw "the data folder was changed" }
           if (Test-Path "$env:RUNNER_TEMP\other") { throw "the refused folder was created" }
+          exit 0  # (the step would otherwise end with the installer's exit code: the refusal that was wanted)

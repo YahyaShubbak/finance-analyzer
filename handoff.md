@@ -51,12 +51,29 @@ sind in dieser Reihenfolge zu committen (jeder Stand baut und testet):
    `frontend/src/test/app.integration.test.tsx`.
 9. **Doku:** `CHANGELOG.md`, `handoff.md`.
 
-Nicht lokal prüfbar und deshalb beim ersten Push beobachten: die neuen
-CI-Schritte in `ci.yml` (Update bei laufender App, Ablehnung eines leeren
-Datenordners — je für Linux und Windows) und `release.yml` (ruft `ci.yml`
-als `workflow_call` auf, vergleicht Tag und Version). Beide Dateien sind
-nur als YAML geprüft; die Versions-Extraktion per `sed` ist lokal
-ausprobiert (dreimal 0.8.0).
+Stand der CI nach dem ersten Push (Lauf zu `035cfe5`, 2026-11-13): Backend-,
+Frontend- und beide `install.sh`-Jobs grün — die neuen Linux-Schritte (Update
+bei laufender App, Ablehnung eines leeren Datenordners) laufen also. Zwei
+Dinge schlugen fehl und sind danach behoben worden (Commit-Message im Chat,
+Dateien `.github/workflows/ci.yml`, `frontend/src/test/app.integration.test.tsx`):
+
+- `install.bat`-Jobs: Der Installer tat, was er sollte (Update, dann
+  Ablehnung), aber ein `pwsh`-Schritt endet mit dem Exit-Code des letzten
+  Programms — hier der gewollten Ablehnung (1). Der Schritt endet jetzt mit
+  `exit 0`.
+- Integrationstest „Dashboard totals and charts render“: `getByText("Income")`
+  / `("Expenses")` fand zwei Elemente, sobald die Konten-Tabelle (mit
+  gleichnamigen Spalten) vor der zweiten Zeile ankam. Der Test bestand nur,
+  solange die Summen zuerst kamen; jetzt `getAllByText`.
+
+Noch ungeprüft: `release.yml` (läuft erst bei einem Tag; ruft `ci.yml` als
+`workflow_call` auf und vergleicht Tag und Version — die Versions-Extraktion
+per `sed` ist lokal ausprobiert).
+
+Die Fehlermeldungen eines CI-Laufs stehen ohne Anmeldung unter
+`https://api.github.com/repos/<owner>/<repo>/check-runs/<job-id>/annotations`
+(Job-IDs aus `/actions/runs/<run-id>/jobs`); `gh` ist auf dieser Maschine
+nicht installiert.
 
 ## Arbeitsweise, die der Nutzer erwartet
 
