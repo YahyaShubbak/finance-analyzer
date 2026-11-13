@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import shutil
-import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,6 +22,7 @@ from app.db.session import session_scope
 from app.normalization.category import sync_default_category_rules
 from app.normalization.merchant import sync_default_merchant_rules
 from app.services.account_recognition import SIGNATURES_MARKER
+from app.services.backup_service import is_backup_zip
 from app.services.import_staging import is_app_document, stored_relative_name
 from app.services.points_service import POINTS_MARKER
 from app.services.rule_service import RULES_MARKER
@@ -76,15 +76,7 @@ def _delete_stored_documents(stored_paths: set[str]) -> int:
 def _is_backup(path: Path) -> bool:
     """A file the app wrote to the backups folder, or a backup put there by
     hand (as Settings lists it): a ZIP holding a database and a manifest."""
-    if path.name.startswith(_BACKUP_PREFIXES):
-        return True
-    if path.suffix.lower() != ".zip":
-        return False
-    try:
-        with zipfile.ZipFile(path) as archive:
-            return {"finance.db", "manifest.json"} <= set(archive.namelist())
-    except (zipfile.BadZipFile, OSError):
-        return False
+    return path.name.startswith(_BACKUP_PREFIXES) or is_backup_zip(path)
 
 
 def _delete_backups() -> int:

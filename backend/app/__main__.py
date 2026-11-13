@@ -38,6 +38,10 @@ def _write_instance_info(data_dir: Path, host: str, port: int) -> None:
     atexit.register(lambda: path.unlink(missing_ok=True))
 
 
+#: exit code of --status when the app is not running (1 and 2 mean: could not tell)
+EXIT_NOT_RUNNING = 3
+
+
 def _running_instance(data_dir: Path) -> dict | None:
     """The live instance using `data_dir`, if any: {"pid", "host", "port"}
     (pid None if it can't be told, e.g. the installer holds the lock)."""
@@ -78,6 +82,39 @@ def _looks_like_this_app(pid: int, instance: dict | None = None) -> bool:
             f"http://127.0.0.1:{instance['port']}")
 
 
+# Windows has no signal that lets another process finish what it is doing:
+# os.kill() there ends it at once, in the middle of whatever it writes. So
+# the app is asked to end itself first (as on Ctrl+C); ending it from
+# outside is what is left when it does not answer (an older version, hung).
+_ASKED_TO_STOP = os.name == "nt"
+
+
+def _ask_to_stop(instance: dict) -> bool:
+    if not instance.get("port"):
+        return False
+    host = instance.get("host") or "127.0.0.1"
+    host = "127.0.0.1" if host in ("0.0.0.0", "::") else host  # noqa: S104 — asks, not binds
+    url = f"http://{f'[{host}]' if ':' in host else host}:{instance['port']}/api/system/stop"
+    request = urllib.request.Request(  # noqa: S310 — always http://
+        url, method="POST", data=json.dumps({"pid": instance["pid"]}).encode(),
+        headers={"X-Finance-Client": "1", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=3) as response:  # noqa: S310
+            return 200 <= response.status < 300
+    except (OSError, ValueError):
+        return False
+
+
+def _gone_within(data_dir: Path, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _running_instance(data_dir) is None:
+            return True
+        time.sleep(0.2)
+    return False
+
+
 def stop_running_instance(data_dir: Path, timeout: float = 15.0) -> str:
     """Ends the instance that uses `data_dir`. Returns "stopped",
     "not-running" or "unknown" (running, but not ours to stop)."""
@@ -87,18 +124,15 @@ def stop_running_instance(data_dir: Path, timeout: float = 15.0) -> str:
     pid = instance["pid"]
     if pid is None or pid == os.getpid() or not _looks_like_this_app(pid, instance):
         return "unknown"
+    if _ASKED_TO_STOP and _ask_to_stop(instance) and _gone_within(data_dir, timeout):
+        return "stopped"
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         return "not-running"
     except OSError:
         return "unknown"
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if _running_instance(data_dir) is None:
-            return "stopped"
-        time.sleep(0.2)
-    return "unknown"
+    return "stopped" if _gone_within(data_dir, timeout) else "unknown"
 
 
 def _answers_as_this_app(url: str) -> bool:
@@ -154,8 +188,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stop", action="store_true",
                         help="stop the running app (also one started without a window) and exit")
     parser.add_argument("--restart", action="store_true", help="stop the running app, then start it again")
+    parser.add_argument("--status", action="store_true",
+                        help=f"say whether the app is running and exit: with 0 if it is, {EXIT_NOT_RUNNING} if not")
     args = parser.parse_args(argv)
     os.umask(0o077)  # bank data: readable by this user only (as run.sh does), also when started directly
+
+    if args.status:
+        # (for the installers: an app that runs must be stopped before its packages are replaced)
+        running = _running_instance(settings.data_dir)
+        if running is None:
+            print("The app is not running.")
+            return EXIT_NOT_RUNNING
+        print("The app is running" + (f" at http://127.0.0.1:{running['port']}." if running.get("port") else "."))
+        return 0
 
     previous = _running_instance(settings.data_dir) if args.restart else None
     if args.port is None:

@@ -414,6 +414,29 @@ if ($KeepLegacy) {
     }
     # Combine() keeps an absolute path as is (Join-Path would glue both together).
     $DataDirChoice = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine((Get-Location).Path, $DataDirChoice))
+
+    # Another folder than the one in use is only written into the settings:
+    # the data stays where it is, and the app would start empty - to the
+    # user, all accounts and bookings gone. (A folder with a database of its
+    # own is a choice between two sets of data, and not asked about.)
+    $currentDb = Join-Path $previous "finance.db"
+    $chosenDb = Join-Path $DataDirChoice "finance.db"
+    if (-not $MoveLegacy -and (Test-Path -LiteralPath $currentDb) -and -not (Test-Path -LiteralPath $chosenDb)) {
+        Write-Warn "Your data is in $previous"
+        Write-Info "The folder you chose has no data. The app would start empty there; your accounts"
+        Write-Info "and bookings stay in the old folder, but the app would no longer show them."
+        Write-Info "To move your data: stop the app, move everything from the old folder into the"
+        Write-Info "new one, then run install.bat again."
+        if (-not $Interactive) {
+            Exit-Install "Not switching to an empty data folder without being asked. Move your data first, or run install.bat without -Yes and confirm. Nothing was changed."
+        }
+        if (Confirm-Choice "Start with an empty data folder in $DataDirChoice anyway?" $false) {
+            Write-Info "OK - the app starts empty there. Your data stays in $previous"
+        } else {
+            $DataDirChoice = $previous
+            Write-Info "OK - keeping $DataDirChoice"
+        }
+    }
 }
 
 $previousPort = Get-ConfigValue "FINANCE_PORT"
@@ -427,7 +450,7 @@ while ($true) {
         $Port = 0
         continue
     }
-    if (Test-PortInUse $parsedPort) { Write-Warn "Port $parsedPort is currently in use (maybe the app is already running - that's fine if so)." }
+    if (Test-PortInUse $parsedPort) { Write-Warn "Port $parsedPort is currently in use (if that is the app: it is stopped before anything is replaced)." }
     break
 }
 
@@ -452,6 +475,30 @@ if ($Interactive -and -not (Confirm-Choice "Install with these settings?" $true)
 
 Write-Step 3 "Installing the backend (Python packages)"
 Set-Location -LiteralPath $BackendDir
+
+# An update while the app runs: Windows keeps the files of a running program
+# locked, so replacing its packages stops half-way and leaves an environment
+# that neither the old nor the new version can use.
+if (Test-Path -LiteralPath $VenvPython) {
+    Invoke-Native { & $VenvPython -m app --status *> $null }
+    $appStatus = $LASTEXITCODE
+    if ($appStatus -eq 0) {
+        Write-Warn "The app is running. It has to be stopped before its packages are replaced."
+        if (-not (Confirm-Choice "Stop the app now?" $true)) {
+            Exit-Install "Close the app (its window, or run.bat --stop), then run install.bat again. The app was not changed."
+        }
+        Invoke-Native { & $VenvPython -m app --stop }
+        if ($LASTEXITCODE -ne 0) {
+            Exit-Install "The app could not be stopped. Close its window (or end its Python process in the task manager), then run install.bat again. The app was not changed."
+        }
+        Write-Info "Start it again when the installation is done."
+    } elseif ($appStatus -ne 3 -and (Test-PortInUse $parsedPort)) {
+        # (3: not running. Anything else: the old environment can't tell - the port may.)
+        if (-not (Confirm-Choice "Port $parsedPort is in use. Is the app stopped? (its files can't be replaced while it runs)" $false)) {
+            Exit-Install "Stop the app (close its window), then run install.bat again. The app was not changed."
+        }
+    }
+}
 
 $oldVenv = Join-Path $BackendDir "finance"
 if (Test-Path -LiteralPath (Join-Path $oldVenv "Scripts\python.exe")) {

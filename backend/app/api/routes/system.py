@@ -2,15 +2,19 @@
 always knows where their data lives — and starting over (reset)."""
 from __future__ import annotations
 
+import os
+import signal
+import threading
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session
 
 from app.config import APP_VERSION, settings
 from app.db.session import get_session, maintenance_lock
+from app.i18n import tr
 from app.services.reset_service import reset_everything
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -49,6 +53,25 @@ def system_info():
         using_legacy_layout=settings.using_legacy_layout,
         restart_needed=_code_stamp() > _STARTED_WITH,
     )
+
+
+def _end_as_ctrl_c() -> None:
+    signal.raise_signal(signal.SIGINT)
+
+
+class StopRequest(BaseModel):
+    pid: int  # the process that is meant: another copy of the app on this port must not end
+
+
+@router.post("/stop", status_code=202)
+def stop(payload: StopRequest):
+    """Ends the app the way Ctrl+C in its window does: requests under way
+    are finished and the database is closed. For `python -m app --stop` on
+    Windows, where ending a process from outside cuts it off at once."""
+    if payload.pid != os.getpid():
+        raise HTTPException(status_code=409, detail=tr("This is not the app that was asked to stop."))
+    threading.Timer(0.2, _end_as_ctrl_c).start()  # (after this answer is on its way)
+    return {"stopping": True}
 
 
 class ResetRequest(BaseModel):

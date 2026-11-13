@@ -102,6 +102,7 @@ or `install.bat -Yes`. All options: `./install.sh --help` /
 ./run.sh --open         # also open the browser
 ./run.sh --stop         # stop the running app — also one started without a window
 ./run.sh --restart      # stop it and start it again, e.g. after an update
+./run.sh --status       # is it running?
 ./run.sh --help
 ```
 
@@ -130,8 +131,8 @@ three are kept. A backup holds your original documents as well.)
 
 - **From a git checkout:** `git pull`, then run the installer again
   (`./install.sh` / `install.bat` — it installs the new package versions and
-  rebuilds the interface; your previous answers are the defaults), then
-  `./run.sh --restart`.
+  rebuilds the interface; your previous answers are the defaults; if the
+  app is still running, it offers to stop it first), then `./run.sh`.
 - **From a release archive:** unpack the new archive in place of the old
   program folder (or next to it) and run the installer in it, choosing the
   same data folder.

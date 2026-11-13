@@ -21,6 +21,8 @@ from app.schemas.backup import BackupInfoRead, RestoreResultRead
 from app.services.backup_service import (
     BackupError,
     create_backup_zip,
+    delete_backup,
+    is_backup_zip,
     list_backups,
     restore_from_backup,
 )
@@ -65,6 +67,20 @@ def _safe_backup_path(filename: str) -> Path:
 def download_backup_route(filename: str):
     path = _safe_backup_path(filename)
     return FileResponse(path, filename=path.name, media_type="application/zip")
+
+
+@router.delete("/{filename}", status_code=204)
+def delete_backup_route(filename: str):
+    """Removes a backup from this machine (they hold every original
+    document and are never removed by themselves, except the oldest safety
+    copies made before a restore)."""
+    path = _safe_backup_path(filename)
+    if not is_backup_zip(path):  # some other ZIP in that folder: not the app's
+        raise HTTPException(status_code=404, detail=tr("Backup not found."))
+    try:
+        delete_backup(path)
+    except BackupError as exc:  # e.g. open in another program
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/restore", response_model=RestoreResultRead)

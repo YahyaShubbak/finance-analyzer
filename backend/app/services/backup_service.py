@@ -85,6 +85,11 @@ _TMP_PREFIX = ".finance-tmp-"
 logger = logging.getLogger("finance")
 
 
+#: the backups made by the app right before a restore: their name, and how many are kept
+SAFETY_PREFIX = "pre-restore-safety"
+SAFETY_BACKUPS_KEPT = 3
+
+
 class BackupError(Exception):
     pass
 
@@ -195,6 +200,42 @@ def create_backup_zip(filename_prefix: str = "finance-backup") -> Path:
             partial_path.unlink(missing_ok=True)
 
     return zip_path
+
+
+def is_backup_zip(path: Path) -> bool:
+    """A backup of this app — also one put into the backups folder by hand:
+    a ZIP holding a database and a manifest. Anything else in that folder
+    (it may be a shared or synced one) is not the app's to list or delete."""
+    if path.suffix.lower() != ".zip":
+        return False
+    try:
+        with zipfile.ZipFile(path) as archive:
+            return {"finance.db", "manifest.json"} <= set(archive.namelist())
+    except (zipfile.BadZipFile, OSError):
+        return False
+
+
+def delete_backup(path: Path) -> None:
+    """Removes one backup for good."""
+    if not is_backup_zip(path):
+        raise BackupError(tr("Backup not found."))
+    try:
+        path.unlink()
+    except OSError as exc:
+        raise BackupError(tr("The backup could not be deleted: {error}", error=exc.strerror or type(exc).__name__)) from exc
+
+
+def _prune_safety_backups() -> None:
+    """Every restore leaves a full backup of the state before it — each
+    with every original document. Kept without limit they fill the disk;
+    the newest SAFETY_BACKUPS_KEPT stay. (Backups the user made are never
+    removed here.)"""
+    copies = sorted(settings.backups_dir.glob(f"{SAFETY_PREFIX}-*.zip"), key=lambda path: path.stat().st_mtime)
+    for old in copies[:-SAFETY_BACKUPS_KEPT]:
+        try:
+            old.unlink()
+        except OSError:
+            logger.warning("Could not remove the old safety backup %s", old.name)
 
 
 def _manifest_counts(manifest: dict) -> dict[str, int]:
@@ -504,7 +545,8 @@ def restore_from_backup(zip_path: Path, confirm: bool) -> RestoreResult:
 
             safety_backup_path = None
             if settings.database_path.exists():
-                safety_backup_path = create_backup_zip(filename_prefix="pre-restore-safety")
+                safety_backup_path = create_backup_zip(filename_prefix=SAFETY_PREFIX)
+                _prune_safety_backups()
             replaced_documents = _stored_document_names(settings.database_path)
 
             # Close pooled connections to the current database before

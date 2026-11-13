@@ -17,6 +17,7 @@ CONFIG_FILE="$REPO_ROOT/finance.env"
 APP_NAME="finance-analyzer"
 MIN_PYTHON="3.12"
 TOTAL_STEPS=6
+UV_VERSION="0.9.15"  # the uv that is downloaded when none is installed
 
 # --- options -------------------------------------------------------------------
 
@@ -199,7 +200,8 @@ if [ "$USE_UV" = false ]; then
     info "          It is installed for your user only (~/.local/bin) from https://astral.sh/uv"
     if [ "$ASSUME_YES" = false ] && confirm "Install uv now?" y; then
       command -v curl >/dev/null 2>&1 || fail "curl is needed to download uv."
-      curl -LsSf https://astral.sh/uv/install.sh | sh
+      # (a named version: what runs here is what was tried, not whatever is newest today)
+      curl -LsSf "https://astral.sh/uv/$UV_VERSION/install.sh" | sh
       export PATH="$HOME/.local/bin:$PATH"
       command -v uv >/dev/null 2>&1 || fail "uv was installed but is not on PATH — open a new terminal and run ./install.sh again."
       USE_UV=true
@@ -277,6 +279,28 @@ else
   DATA_DIR="${OPT_DATA_DIR:-$(ask "Data folder:" "${previous_dir:-$(default_data_dir)}")}"
   DATA_DIR="${DATA_DIR/#\~/$HOME}"
   case "$DATA_DIR" in /*) ;; *) DATA_DIR="$PWD/$DATA_DIR" ;; esac
+
+  # Another folder than the one in use is only written into the settings:
+  # the data stays where it is, and the app would start empty — to the user,
+  # all accounts and bookings gone. (A folder with a database of its own is
+  # a choice between two sets of data, and not asked about.)
+  current_dir="${previous_dir:-$(default_data_dir)}"
+  if [ "$MOVE_LEGACY" = false ] && [ -f "$current_dir/finance.db" ] && [ ! -f "$DATA_DIR/finance.db" ]; then
+    warn "Your data is in $current_dir"
+    info "The folder you chose has no data. The app would start empty there; your accounts"
+    info "and bookings stay in the old folder, but the app would no longer show them."
+    info "To move your data: stop the app, move everything from the old folder into the"
+    info "new one, then run ./install.sh again."
+    if [ "$ASSUME_YES" = true ]; then
+      fail "Not switching to an empty data folder without being asked. Move your data first, or run ./install.sh without --yes and confirm. Nothing was changed."
+    fi
+    if confirm "Start with an empty data folder in $DATA_DIR anyway?" n; then
+      info "OK — the app starts empty there. Your data stays in $current_dir"
+    else
+      DATA_DIR="$current_dir"
+      info "OK — keeping $DATA_DIR"
+    fi
+  fi
 fi
 
 previous_port="$(config_value FINANCE_PORT)"
@@ -286,7 +310,7 @@ while true; do
     warn "Please enter a number between 1024 and 65535."; OPT_PORT=""; [ "$ASSUME_YES" = true ] && fail "Invalid port: $PORT"; continue
   fi
   if port_in_use "$PORT"; then
-    warn "Port $PORT is currently in use (maybe the app is already running — that's fine if so)."
+    warn "Port $PORT is currently in use (if that is the app: it is stopped before anything is replaced)."
   fi
   break
 done
@@ -321,6 +345,30 @@ fi
 
 step 3 "Installing the backend (Python packages)"
 cd "$BACKEND_DIR"
+
+# An update while the app runs: it would go on running the old version on
+# top of replaced packages (and may fail the next time it loads one).
+if [ -x "$VENV_DIR/bin/python" ]; then
+  app_status=0
+  "$VENV_DIR/bin/python" -m app --status >/dev/null 2>&1 || app_status=$?
+  case $app_status in
+    0)
+      warn "The app is running. It should be stopped while it is updated."
+      if confirm "Stop the app now?" y; then
+        "$VENV_DIR/bin/python" -m app --stop \
+          || fail "The app could not be stopped. Close it (Ctrl+C in its window), then run ./install.sh again. The app was not changed."
+        info "Start it again with ./run.sh when the installation is done."
+      else
+        warn "The app keeps running the old version until it is started anew (./run.sh --restart)."
+      fi ;;
+    3) ;;  # not running
+    *)  # the old environment can't tell: the port may
+      if port_in_use "$PORT"; then
+        warn "Port $PORT is in use. If that is the app, stop it now (Ctrl+C in its window, or ./run.sh --stop)."
+        confirm "Go on with the installation?" y || fail "Stop the app, then run ./install.sh again. The app was not changed."
+      fi ;;
+  esac
+fi
 
 if [ -d "$BACKEND_DIR/finance" ] && [ -x "$BACKEND_DIR/finance/bin/python" ]; then
   warn "backend/finance is the environment of an older version and is no longer used."

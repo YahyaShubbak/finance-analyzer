@@ -194,6 +194,8 @@ DE: dict[str, str] = {
     # backup / restore
     "Backup was created but could not be read back.": "Die Sicherung wurde erstellt, konnte aber nicht wieder gelesen werden.",
     "Backup not found.": "Sicherung nicht gefunden.",
+    "This is not the app that was asked to stop.": "Gemeint war eine andere laufende App, nicht diese.",
+    "The backup could not be deleted: {error}": "Die Sicherung konnte nicht gelöscht werden: {error}",
     "Restore requires explicit confirmation.": "Die Wiederherstellung muss ausdrücklich bestätigt werden.",
     "No database found to back up yet.": "Es gibt noch keine Datenbank, die gesichert werden könnte.",
     "This backup contains an unsafe file name: {name!r}": "Diese Sicherung enthält einen unsicheren Dateinamen: „{name}“",

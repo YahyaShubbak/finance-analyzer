@@ -541,3 +541,72 @@ def test_a_backup_works_in_a_folder_with_the_apps_prefix(client, tmp_path, monke
 
     assert made and all(prefix == ".finance-tmp-" for prefix in made)
     assert not list(settings.data_dir.glob(".finance-tmp-*"))  # removed when done
+
+
+# ---------------------------------------------------------------------------
+# Backups don't pile up, and can be deleted
+# ---------------------------------------------------------------------------
+
+def test_only_the_newest_safety_backups_from_before_restores_are_kept(client, tmp_path):
+    """Each restore leaves a full backup of the state before it (with every
+    original document): without a limit they fill the disk."""
+    import os
+
+    from app.config import settings
+
+    _build_rich_scenario(client, tmp_path)
+    backup = client.post("/api/backup/create").json()["filename"]
+    zip_bytes = _download_backup(client, backup)
+    # left by earlier restores (oldest first), and a backup the user made long ago
+    for age, name in enumerate(["pre-restore-safety-20260104-000000.zip", "pre-restore-safety-20260103-000000.zip",
+                                "pre-restore-safety-20260102-000000.zip", "pre-restore-safety-20260101-000000.zip",
+                                "finance-backup-20250101-000000.zip"], start=1):
+        path = settings.backups_dir / name
+        path.write_bytes(zip_bytes)
+        os.utime(path, (path.stat().st_atime, path.stat().st_mtime - age * 86400))
+
+    assert _restore(client, zip_bytes).status_code == 200
+
+    names = {path.name for path in settings.backups_dir.iterdir()}
+    safety = sorted(name for name in names if name.startswith("pre-restore-safety-"))
+    assert len(safety) == 3
+    # the one just made and the two newest before it
+    assert {"pre-restore-safety-20260104-000000.zip", "pre-restore-safety-20260103-000000.zip"} < set(safety)
+    # what the user made is never removed by the app
+    assert {backup, "finance-backup-20250101-000000.zip"} <= names
+
+
+def test_a_backup_can_be_deleted(client, tmp_path):
+    from app.config import settings
+
+    _build_rich_scenario(client, tmp_path)
+    kept = client.post("/api/backup/create").json()["filename"]
+    doomed = "finance-backup-20250101-000000.zip"
+    (settings.backups_dir / doomed).write_bytes(_download_backup(client, kept))
+    assert {b["filename"] for b in client.get("/api/backup").json()} == {kept, doomed}
+
+    assert client.delete(f"/api/backup/{doomed}").status_code == 204
+
+    assert [b["filename"] for b in client.get("/api/backup").json()] == [kept]
+    assert not (settings.backups_dir / doomed).exists()
+    assert client.delete(f"/api/backup/{doomed}").status_code == 404  # gone
+
+
+def test_only_backups_can_be_deleted_from_the_backups_folder(client, tmp_path):
+    """The folder may be a shared or synced one: what is no backup of this
+    app is not the app's to delete."""
+    import zipfile
+
+    from app.config import settings
+
+    settings.ensure_directories()
+    foreign = settings.backups_dir / "holiday-photos.zip"
+    with zipfile.ZipFile(foreign, "w") as archive:
+        archive.writestr("beach.jpg", b"...")
+    outside = tmp_path / "outside.zip"
+    outside.write_bytes(foreign.read_bytes())
+
+    assert client.delete("/api/backup/holiday-photos.zip").status_code == 404
+    assert client.delete("/api/backup/..%2Foutside.zip").status_code in (404, 405)  # (no such route)
+    assert client.delete("/api/backup/finance.db").status_code == 404
+    assert foreign.exists() and outside.exists()

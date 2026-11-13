@@ -216,3 +216,19 @@ def test_starting_the_running_app_again_with_open_just_opens_the_browser(entry, 
     assert module.main(["--port", "8499", "--no-open"]) == 1
     assert opened == ["http://127.0.0.1:8499"] and not started
     assert "already running" in capsys.readouterr().err
+
+
+def test_status_tells_a_running_app_from_none(entry, tmp_path, capsys):
+    """For the installers: an app that runs is stopped before its packages are replaced."""
+    module, started = entry
+    assert module.main(["--status"]) == module.EXIT_NOT_RUNNING == 3
+    assert "not running" in capsys.readouterr().out
+
+    proc = hold_lock_in_another_process(tmp_path)  # the app, running
+    try:
+        assert module.main(["--status"]) == 0
+        assert "is running" in capsys.readouterr().out
+    finally:
+        proc.kill()
+        proc.wait()
+    assert not started  # asking never starts it
