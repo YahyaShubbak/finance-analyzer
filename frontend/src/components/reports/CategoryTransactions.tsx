@@ -27,7 +27,9 @@ export function CategoryTransactions({
       title={t("reports.categoryTransactions", { category: categoryLabel(t, category) })}
       currency={currency}
       queryKey={["category", category, currency, accountId, start, end]}
-      fetchPage={(page, page_size, view) => getCategoryTransactions({ ...view, category, currency, account_id: accountId ? String(accountId) : undefined, start, end, page, page_size })}
+      fetchPage={(page, page_size, view, signal) =>
+        getCategoryTransactions({ ...view, category, currency, account_id: accountId ? String(accountId) : undefined, start, end, page, page_size }, signal)
+      }
       emptyText={t("reports.categoryEmpty")}
       onClose={onClose}
     />

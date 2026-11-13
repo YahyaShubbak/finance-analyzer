@@ -17,7 +17,7 @@ interface Props {
   title: string;
   currency: string;
   queryKey: readonly unknown[];
-  fetchPage: (page: number, pageSize: number, view: ListView) => Promise<CategoryTransactions>;
+  fetchPage: (page: number, pageSize: number, view: ListView, signal: AbortSignal) => Promise<CategoryTransactions>;
   emptyText: string;
   onClose: () => void;
 }
@@ -40,7 +40,7 @@ function RowTransactions({ title, currency, queryKey, fetchPage, emptyText, onCl
   const view: ListView = { search: search || undefined, sort: sort.key, order: sort.order };
   const query = useQuery({
     queryKey: ["breakdown-transactions", ...queryKey, view, page],
-    queryFn: () => fetchPage(page, PAGE_SIZE, view),
+    queryFn: ({ signal }) => fetchPage(page, PAGE_SIZE, view, signal),
     placeholderData: (prev) => prev, // keep the list while paging, sorting or searching
   });
   const heading = useRef<HTMLHeadingElement>(null);

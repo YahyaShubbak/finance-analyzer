@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { createBackup, listBackups, restoreFromExisting, restoreFromUpload } from "../api/backup";
+import { createBackup, deleteBackup, listBackups, restoreFromExisting, restoreFromUpload } from "../api/backup";
 import { invalidateTransactionDependentQueries } from "./invalidation";
 import { clearQueue } from "../state/importQueue";
 
@@ -11,6 +11,14 @@ export function useCreateBackup() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: createBackup,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["backups"] }),
+  });
+}
+
+export function useDeleteBackup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (filename: string) => deleteBackup(filename),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["backups"] }),
   });
 }

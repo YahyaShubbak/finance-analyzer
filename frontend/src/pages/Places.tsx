@@ -193,7 +193,9 @@ function PlaceTransactions({
       title={title}
       currency={currency}
       queryKey={["place", currency, key, town, start, end]}
-      fetchPage={(page, page_size, view) => getLocationTransactions({ ...view, ...where, currency, start, end, page, page_size })}
+      fetchPage={(page, page_size, view, signal) =>
+        getLocationTransactions({ ...view, ...where, currency, start, end, page, page_size }, signal)
+      }
       emptyText={t("places.empty")}
       onClose={onClose}
     />

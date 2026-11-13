@@ -575,6 +575,8 @@ export interface PointsProgram {
   /** cents that 100 points are worth */
   value_per_100: number;
   value_set_by_user: boolean;
+  /** the currency a point's value is in: the card's */
+  currency: string;
   balance: number;
   balance_value_minor: number;
   /** from a statement's stated balance (else the sum of what was read) */

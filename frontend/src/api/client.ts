@@ -31,6 +31,13 @@ export class ApiError extends Error {
   }
 }
 
+/** For the query cache: one more try when no answer came or the server
+ * failed — never for a request it refused (4xx: asked again, it says the same). */
+export function retryQuery(failureCount: number, error: unknown): boolean {
+  if (error instanceof ApiError && error.status >= 400 && error.status < 500) return false;
+  return failureCount < 1;
+}
+
 interface ValidationErrorItem {
   loc?: (string | number)[];
   msg?: string;
@@ -85,13 +92,21 @@ async function handle<T>(res: Response): Promise<T> {
 async function send(path: string, init: RequestInit = {}): Promise<Response> {
   try {
     return await fetch(apiUrl(path), { ...init, headers: { ...clientHeaders(), ...(init.headers ?? {}) } });
-  } catch {
-    // fetch only rejects when no response arrived at all (server stopped)
+  } catch (error) {
+    // given up on purpose (a newer search replaced this one): not an error to show
+    if (init.signal?.aborted) throw error;
+    // otherwise fetch only rejects when no response arrived at all (server stopped)
     throw new ApiError(0, translate(getLang(), "error.offline"));
   }
 }
 
-export async function apiGet<T>(path: string, params?: Record<string, string | number | boolean | undefined>): Promise<T> {
+/** `signal`: the query cache's — it gives a request up when its answer is
+ * not wanted any more (the search text changed, the page was left). */
+export async function apiGet<T>(
+  path: string,
+  params?: Record<string, string | number | boolean | undefined>,
+  signal?: AbortSignal
+): Promise<T> {
   const query = new URLSearchParams();
   if (params) {
     for (const [key, value] of Object.entries(params)) {
@@ -101,7 +116,7 @@ export async function apiGet<T>(path: string, params?: Record<string, string | n
     }
   }
   const qs = query.toString();
-  return handle<T>(await send(qs ? `${path}?${qs}` : path));
+  return handle<T>(await send(qs ? `${path}?${qs}` : path, { signal }));
 }
 
 function jsonRequest(method: string, body?: unknown): RequestInit {

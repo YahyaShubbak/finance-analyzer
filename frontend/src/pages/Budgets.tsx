@@ -4,12 +4,7 @@ import { BudgetForm } from "../components/budgets/BudgetForm";
 import { BudgetProgressRow } from "../components/budgets/BudgetProgressRow";
 import { useBudgetStatus } from "../hooks/useBudgets";
 import { useI18n } from "../i18n/useI18n";
-import { getFormatLocale } from "../lib/format";
-
-function currentMonth(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-}
+import { currentMonth, getFormatLocale } from "../lib/format";
 
 // (no <input type="month">: Firefox shows it as a plain text field)
 function shiftMonth(month: string, delta: number): string {

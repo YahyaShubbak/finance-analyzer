@@ -18,6 +18,10 @@ export function useCategoryAssignment() {
   const [learn, setLearnState] = useState(loadLearnPreference);
   const [notice, setNotice] = useState<CategoryNotice | null>(null);
   const [savingId, setSavingId] = useState<number | null>(null);
+  // Kept here, not read from the mutations: they only know their latest
+  // call, so a failure of the one before (still under way when the next
+  // category was chosen) would never be shown.
+  const [error, setError] = useState<Error | null>(null);
   const learnCategory = useCreateCategoryRule();
   const updateTransaction = useUpdateTransaction();
   const forgetRule = useForgetCategoryRule();
@@ -29,45 +33,38 @@ export function useCategoryAssignment() {
 
   function assign(tx: Transaction, category: string) {
     setNotice(null);
-    learnCategory.reset();
-    updateTransaction.reset();
-    forgetRule.reset();
+    setError(null);
     setSavingId(tx.id);
-    const onSettled = () => setSavingId(null);
-    if (learn) {
-      learnCategory.mutate(
-        { transactionId: tx.id, category },
-        {
-          onSuccess: (result) =>
-            setNotice(
-              result.category_rule
-                ? {
-                    kind: "learned",
-                    ruleId: result.category_rule.id,
-                    pattern: result.category_rule.pattern,
-                    category,
-                    applied: result.applied_to,
-                  }
-                : { kind: "notLearnable", category }
-            ),
-          onSettled,
-        }
-      );
-    } else {
-      updateTransaction.mutate(
-        { id: tx.id, patch: { category } },
-        { onSuccess: () => setNotice({ kind: "only", category }), onSettled }
-      );
-    }
+    const saved = learn
+      ? learnCategory.mutateAsync({ transactionId: tx.id, category }).then((result) =>
+          setNotice(
+            result.category_rule
+              ? {
+                  kind: "learned",
+                  ruleId: result.category_rule.id,
+                  pattern: result.category_rule.pattern,
+                  category,
+                  applied: result.applied_to,
+                }
+              : { kind: "notLearnable", category }
+          )
+        )
+      : updateTransaction
+          .mutateAsync({ id: tx.id, patch: { category } })
+          .then(() => setNotice({ kind: "only", category }));
+    saved
+      .catch((failure: Error) => setError(failure))
+      // (a later assignment may be the one that is being saved now)
+      .finally(() => setSavingId((current) => (current === tx.id ? null : current)));
   }
 
   function forget(ruleId: number) {
-    forgetRule.mutate(ruleId, {
-      onSuccess: (result) => setNotice({ kind: "forgotten", count: result.transactions_changed }),
-    });
+    setError(null);
+    forgetRule
+      .mutateAsync(ruleId)
+      .then((result) => setNotice({ kind: "forgotten", count: result.transactions_changed }))
+      .catch((failure: Error) => setError(failure));
   }
-
-  const error = (learnCategory.error ?? updateTransaction.error ?? forgetRule.error) as Error | null;
 
   return {
     assign,

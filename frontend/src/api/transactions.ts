@@ -8,7 +8,7 @@ import type {
   TransactionListResponse,
 } from "../types";
 
-export function listTransactions(filters: TransactionFilters) {
+export function listTransactions(filters: TransactionFilters, signal?: AbortSignal) {
   return apiGet<TransactionListResponse>("/api/transactions", {
     account_id: filters.account_id,
     category: filters.category,
@@ -24,7 +24,7 @@ export function listTransactions(filters: TransactionFilters) {
     order: filters.order,
     page: filters.page ?? 1,
     page_size: filters.page_size ?? 50,
-  });
+  }, signal);
 }
 
 export function updateTransaction(

@@ -6,9 +6,8 @@ import { OpeningBalanceForm } from "./OpeningBalanceForm";
 import { useUpdateAccount } from "../../hooks/useAccounts";
 import { formatAccountBalance } from "../../lib/accountBalance";
 import { formatDate, formatMoney } from "../../lib/format";
+import { CURRENCIES } from "../../lib/currencies";
 import type { Account } from "../../types";
-
-const CURRENCIES = ["EUR", "USD", "GBP", "CHF"];
 
 export function AccountRow({ account }: { account: Account }) {
   const { t } = useI18n();
@@ -37,6 +36,7 @@ export function AccountRow({ account }: { account: Account }) {
   }
 
   function toggleArchive() {
+    update.reset();
     update.mutate({ id: account.id, patch: { is_archived: !account.is_archived } });
   }
 
@@ -128,10 +128,14 @@ export function AccountRow({ account }: { account: Account }) {
               <Button variant="ghost" onClick={() => setEditing(true)} className="!px-2 !py-1 text-xs">
                 {t("common.edit")}
               </Button>
-              <Button variant="ghost" onClick={toggleArchive} className="!px-2 !py-1 text-xs">
+              <Button variant="ghost" onClick={toggleArchive} disabled={update.isPending} className="!px-2 !py-1 text-xs">
                 {account.is_archived ? t("accounts.unarchive") : t("accounts.archive")}
               </Button>
             </div>
+          )}
+          {/* (while editing, the error stands under the fields) */}
+          {!editing && update.isError && (
+            <div role="alert" className="mt-1 text-xs text-danger text-right">{(update.error as Error).message}</div>
           )}
         </td>
       </tr>

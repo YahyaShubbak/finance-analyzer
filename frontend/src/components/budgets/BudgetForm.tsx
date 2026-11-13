@@ -4,8 +4,7 @@ import { useBudgets, useUpsertBudget } from "../../hooks/useBudgets";
 import { CATEGORIES, categoryLabel } from "../../lib/categories";
 import { useCategoryNames } from "../../hooks/useCategories";
 import { useI18n } from "../../i18n/useI18n";
-
-const CURRENCIES = ["EUR", "USD", "GBP", "CHF"];
+import { CURRENCIES } from "../../lib/currencies";
 
 export function BudgetForm({
   onDone,

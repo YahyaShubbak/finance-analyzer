@@ -43,8 +43,8 @@ export interface CategoryTransactionsQuery extends ListView {
 }
 
 /** The transactions behind one category of getCategoryBreakdown — they add up to its amount. */
-export function getCategoryTransactions(q: CategoryTransactionsQuery) {
-  return apiGet<CategoryTransactions>("/api/analytics/by-category/transactions", { ...q });
+export function getCategoryTransactions(q: CategoryTransactionsQuery, signal?: AbortSignal) {
+  return apiGet<CategoryTransactions>("/api/analytics/by-category/transactions", { ...q }, signal);
 }
 
 export function getMonthlySeries(q: AnalyticsQuery) {
@@ -78,6 +78,6 @@ export interface LocationTransactionsQuery extends ListView {
   page_size: number;
 }
 
-export function getLocationTransactions(q: LocationTransactionsQuery) {
-  return apiGet<CategoryTransactions>("/api/analytics/by-location/transactions", { ...q });
+export function getLocationTransactions(q: LocationTransactionsQuery, signal?: AbortSignal) {
+  return apiGet<CategoryTransactions>("/api/analytics/by-location/transactions", { ...q }, signal);
 }

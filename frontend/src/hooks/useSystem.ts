@@ -7,10 +7,11 @@ export function useSystemInfo() {
   return useQuery({ queryKey: ["system-info"], queryFn: getSystemInfo, staleTime: Infinity });
 }
 
-/** Checked now and then: an update on disk needs a restart of the running program. */
+/** Checked now and then: an update on disk needs a restart of the running program.
+ * (The same cache entry as useSystemInfo: one request serves both.) */
 export function useRestartNeeded(): boolean {
   const { data } = useQuery({
-    queryKey: ["system-restart-check"],
+    queryKey: ["system-info"],
     queryFn: getSystemInfo,
     refetchInterval: 60_000,
     refetchOnWindowFocus: true,

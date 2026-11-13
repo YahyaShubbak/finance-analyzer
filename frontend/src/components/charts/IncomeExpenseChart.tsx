@@ -2,6 +2,7 @@ import { Bar, BarChart, CartesianGrid, Cell, Legend, ResponsiveContainer, Toolti
 import type { MonthlyPoint } from "../../types";
 import { formatMonth, formatMoney } from "../../lib/format";
 import { useI18n } from "../../i18n/useI18n";
+import { clickedIndex } from "../../lib/chartClick";
 
 /** Income and expenses per month. With `onSelectMonth`, a click on a month
  * (anywhere in its column) chooses it; the chosen one stays highlighted. */
@@ -31,8 +32,8 @@ export function IncomeExpenseChart({
         data={chartData}
         margin={{ top: 8, right: 8, left: 8, bottom: 0 }}
         onClick={(state) => {
-          const index = Number(state?.activeIndex);
-          if (onSelectMonth && Number.isInteger(index) && chartData[index]) onSelectMonth(chartData[index].key);
+          const index = clickedIndex(state?.activeIndex);
+          if (onSelectMonth && index !== null && chartData[index]) onSelectMonth(chartData[index].key);
         }}
         style={onSelectMonth ? { cursor: "pointer" } : undefined}
       >

@@ -3,6 +3,7 @@ import { useBackups, useCreateBackup } from "../../hooks/useBackup";
 import { backupDownloadUrl } from "../../api/backup";
 import { formatBytes, formatDateTime } from "../../lib/format";
 import { RestoreExistingButton } from "./RestoreExistingButton";
+import { DeleteBackupButton } from "./DeleteBackupButton";
 import { BreakableName } from "../ui/BreakableName";
 import { useI18n } from "../../i18n/useI18n";
 
@@ -74,6 +75,7 @@ export function BackupSection() {
                           {t("backup.download")}
                         </a>
                         <RestoreExistingButton filename={b.filename} />
+                        <DeleteBackupButton filename={b.filename} />
                       </div>
                     </td>
                   </tr>

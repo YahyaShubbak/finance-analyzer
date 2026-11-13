@@ -6,7 +6,7 @@ import type { Transaction, TransactionFilters } from "../types";
 export function useTransactions(filters: TransactionFilters) {
   return useQuery({
     queryKey: ["transactions", filters],
-    queryFn: () => listTransactions(filters),
+    queryFn: ({ signal }) => listTransactions(filters, signal),
     placeholderData: (prev) => prev,
   });
 }

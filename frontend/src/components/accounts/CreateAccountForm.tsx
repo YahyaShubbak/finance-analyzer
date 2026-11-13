@@ -3,8 +3,7 @@ import { useI18n } from "../../i18n/useI18n";
 import { Button } from "../ui";
 import { useCreateAccount } from "../../hooks/useAccounts";
 import type { AccountType } from "../../types";
-
-const CURRENCIES = ["EUR", "USD", "GBP", "CHF"];
+import { CURRENCIES } from "../../lib/currencies";
 
 export function CreateAccountForm({ onDone }: { onDone: () => void }) {
   const { t } = useI18n();

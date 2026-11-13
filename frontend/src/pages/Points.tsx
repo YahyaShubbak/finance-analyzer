@@ -3,7 +3,7 @@ import clsx from "clsx";
 import { Card, EmptyState, ErrorState, PageHeader } from "../components/ui";
 import { PointsChart } from "../components/charts/PointsChart";
 import { usePoints, useUpdatePointsProgram } from "../hooks/usePoints";
-import { formatDate, formatMoney, formatSignedMoney, getFormatLocale } from "../lib/format";
+import { currencySymbol, formatDate, formatMoney, formatSignedMoney, getFormatLocale } from "../lib/format";
 import { useI18n } from "../i18n/useI18n";
 import type { PointsProgram } from "../types";
 
@@ -41,6 +41,8 @@ function Programs({ programs }: { programs: PointsProgram[] }) {
   const number = new Intl.NumberFormat(getFormatLocale());
   const [chosenId, setChosenId] = useState<number>(programs[0].id);
   const chosen = programs.find((p) => p.id === chosenId) ?? programs[0];
+  // (amounts in different currencies are never added up)
+  const oneCurrency = programs.every((p) => p.currency === programs[0].currency);
   const total = programs.reduce((sum, p) => sum + p.balance_value_minor, 0);
   return (
     <>
@@ -61,13 +63,13 @@ function Programs({ programs }: { programs: PointsProgram[] }) {
             <div className="mt-0.5 text-lg font-semibold text-ink tabular-nums">
               {number.format(p.balance)} <span className="text-sm font-normal text-ink-muted">{p.unit}</span>
             </div>
-            <div className="text-xs text-ink-muted tabular-nums">≈ {formatMoney(p.balance_value_minor)}</div>
+            <div className="text-xs text-ink-muted tabular-nums">≈ {formatMoney(p.balance_value_minor, p.currency)}</div>
           </button>
         ))}
-        {programs.length > 1 && (
+        {programs.length > 1 && oneCurrency && (
           <div className="rounded-lg border border-dashed border-border px-4 py-3">
             <div className="text-xs text-ink-muted">{t("points.totalValue")}</div>
-            <div className="mt-0.5 text-lg font-semibold text-ink tabular-nums">{formatMoney(total)}</div>
+            <div className="mt-0.5 text-lg font-semibold text-ink tabular-nums">{formatMoney(total, programs[0].currency)}</div>
           </div>
         )}
       </div>
@@ -90,7 +92,7 @@ function ProgramCard({ program }: { program: PointsProgram }) {
           <h2 className="text-sm font-semibold text-ink">{program.name}</h2>
           <div className="mt-1 text-2xl font-semibold text-ink tabular-nums">
             {points(program.balance)}
-            <span className="ml-2 text-base font-normal text-ink-muted">≈ {formatMoney(program.balance_value_minor)}</span>
+            <span className="ml-2 text-base font-normal text-ink-muted">≈ {formatMoney(program.balance_value_minor, program.currency)}</span>
           </div>
           <div className="text-xs text-ink-faint mt-0.5">
             {program.balance_stated
@@ -132,7 +134,7 @@ function ProgramCard({ program }: { program: PointsProgram }) {
                     <th className="text-left font-medium py-1">{t("col.merchant")}</th>
                     <th className="text-right font-medium py-1">{t("points.bookings")}</th>
                     <th className="text-right font-medium py-1">{t("points.points")}</th>
-                    <th className="text-right font-medium py-1">{t("points.perEuro")}</th>
+                    <th className="text-right font-medium py-1">{t("points.perUnit", { currency: currencySymbol(program.currency) })}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -162,7 +164,7 @@ function ProgramCard({ program }: { program: PointsProgram }) {
                   <span className="text-ink-muted">{formatDate(r.date)}</span>
                   <span className="tabular-nums text-ink">
                     {points(r.points)}
-                    {r.value_minor !== null && <span className="text-ink-muted"> · {formatMoney(r.value_minor)}</span>}
+                    {r.value_minor !== null && <span className="text-ink-muted"> · {formatMoney(r.value_minor, program.currency)}</span>}
                   </span>
                 </li>
               ))}

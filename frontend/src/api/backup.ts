@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiPostForm, apiUpload, apiUrl } from "./client";
+import { apiDelete, apiGet, apiPost, apiPostForm, apiUpload, apiUrl } from "./client";
 import type { BackupInfo, RestoreResult } from "../types";
 
 export function listBackups() {
@@ -7,6 +7,10 @@ export function listBackups() {
 
 export function createBackup() {
   return apiPost<BackupInfo>("/api/backup/create");
+}
+
+export function deleteBackup(filename: string) {
+  return apiDelete<void>(`/api/backup/${encodeURIComponent(filename)}`);
 }
 
 export function backupDownloadUrl(filename: string) {

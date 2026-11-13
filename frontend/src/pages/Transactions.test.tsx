@@ -37,7 +37,7 @@ async function openPageWithStoredCategory(category: string) {
     </LanguageProvider>
   );
   await waitFor(() => expect(apiGet).toHaveBeenCalledWith("/api/categories"));
-  await waitFor(() => expect(apiGet).toHaveBeenCalledWith("/api/transactions", expect.anything()));
+  await waitFor(() => expect(apiGet).toHaveBeenCalledWith("/api/transactions", expect.anything(), expect.anything())); // (filters, the signal)
   return (categories: unknown[]) => act(async () => answerCategories(categories));
 }
 

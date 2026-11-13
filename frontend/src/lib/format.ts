@@ -39,6 +39,16 @@ export function formatMoney(minorUnits: number, currency = "EUR"): string {
   return `${number} ${currency}`.trim();
 }
 
+/** "€", "CHF", "$" — how the currency is written in amounts. */
+export function currencySymbol(currency: string): string {
+  try {
+    const parts = new Intl.NumberFormat(locale, { style: "currency", currency }).formatToParts(0);
+    return parts.find((part) => part.type === "currency")?.value ?? currency;
+  } catch {
+    return currency; // not an ISO code Intl knows
+  }
+}
+
 export function formatSignedMoney(minorUnits: number, currency = "EUR"): string {
   const formatted = formatMoney(Math.abs(minorUnits), currency);
   return minorUnits < 0 ? `-${formatted}` : `+${formatted}`;
@@ -49,6 +59,11 @@ export function formatSignedMoney(minorUnits: number, currency = "EUR"): string 
 export function toLocalIsoDate(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** This month as the API names months: "2026-03" (local time). */
+export function currentMonth(): string {
+  return toLocalIsoDate(new Date()).slice(0, 7);
 }
 
 export function formatDate(iso: string): string {

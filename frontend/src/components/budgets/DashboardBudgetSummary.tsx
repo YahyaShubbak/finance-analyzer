@@ -1,14 +1,9 @@
 import { Link } from "react-router-dom";
 import { Card } from "../ui";
-import { formatMoney } from "../../lib/format";
+import { currentMonth, formatMoney } from "../../lib/format";
 import { useBudgetStatus } from "../../hooks/useBudgets";
 import { categoryLabel } from "../../lib/categories";
 import { useI18n } from "../../i18n/useI18n";
-
-function currentMonth(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-}
 
 /** Compact "how am I doing against my budgets" widget — only rendered
  * when budgets exist, so users who haven't set any up yet don't see an
