@@ -4,6 +4,7 @@ import { DataLocationSection } from "../components/settings/DataLocationSection"
 import { RestoreFromFileSection } from "../components/settings/RestoreFromFileSection";
 import { RulesSection } from "../components/settings/RulesSection";
 import { LanguageSection } from "../components/settings/LanguageSection";
+import { StatementReminderSection } from "../components/settings/StatementReminderSection";
 import { LearnedRulesSection } from "../components/settings/LearnedRulesSection";
 import { CategoriesSection } from "../components/settings/CategoriesSection";
 import { ResetSection } from "../components/settings/ResetSection";
@@ -16,6 +17,7 @@ export function Settings() {
       <PageHeader title={t("settings.title")} subtitle={t("settings.subtitle")} />
       <div className="p-8 space-y-6 max-w-4xl">
         <LanguageSection />
+        <StatementReminderSection />
         <CategoriesSection />
         <LearnedRulesSection />
         <RulesSection />

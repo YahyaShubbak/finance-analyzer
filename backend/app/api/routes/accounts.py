@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
@@ -7,8 +10,9 @@ from sqlmodel import Session, select
 from app.db.models import Account
 from app.db.session import get_session
 from app.i18n import tr
-from app.schemas.account import AccountCreate, AccountRead, AccountUpdate
+from app.schemas.account import AccountCreate, AccountRead, AccountUpdate, StatementReminderRead
 from app.services.account_service import account_read, compute_account_summaries
+from app.services.statement_reminders import statement_reminders
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
@@ -37,6 +41,12 @@ def _reject_iban_in_use(session: Session, iban: str | None, account_id: int | No
     if other is not None:
         raise HTTPException(status_code=409, detail=tr(
             "The account '{name}' already has this IBAN.", name=other.name))
+
+
+@router.get("/statement-reminders", response_model=list[StatementReminderRead])
+def list_statement_reminders(session: Session = Depends(get_session)):
+    """Statements that should be out by now but are not imported yet."""
+    return [StatementReminderRead(**asdict(r)) for r in statement_reminders(session, date.today())]
 
 
 @router.post("", response_model=AccountRead)

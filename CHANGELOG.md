@@ -7,6 +7,18 @@ start — back up your data before updating).
 
 ## Unreleased
 
+### Added
+- Reminder of new statements: on opening, the app names the statements that
+  should be out by now, per account. It learns when each account's statement
+  comes (end of month, mid-month, quarterly …) from the statements already
+  imported. "Noted" reminds again next time, "OK" hides it until the next
+  statement is due, "Don't remind me again" turns it off (back on in
+  Settings). Archived accounts and accounts without a statement for six
+  periods are left out.
+- Import history: a "Billing period" column (the months a statement is
+  about, e.g. "June – July 2026" for one ending mid-month) and a filter by
+  year or month.
+
 ### Fixed
 - "Undo" on an import card could remove a different import: after its own
   import had been removed in the list (the next import got the same

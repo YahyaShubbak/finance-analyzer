@@ -18,6 +18,19 @@ export interface Account {
   current_balance_minor: number;
 }
 
+/** A statement that should be ready to download (GET /api/accounts/statement-reminders). */
+export interface StatementReminder {
+  account_id: number;
+  account_name: string;
+  account_type: AccountType;
+  last_period_end: string;
+  period_end: string;
+  missing: number;
+  rhythm_months: number;
+  month_end: boolean;
+  day: number;
+}
+
 export interface Transaction {
   id: number;
   account_id: number;

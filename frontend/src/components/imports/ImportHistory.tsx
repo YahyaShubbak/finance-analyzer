@@ -5,13 +5,15 @@ import { Button, Card, EmptyState, ErrorState } from "../ui";
 import { ImportHistoryRow } from "./ImportHistoryRow";
 import { useImportHistory, useRemoveImports } from "../../hooks/useImports";
 import type { ImportRecord } from "../../types";
+import { billingMonths, formatMonthLong } from "../../lib/billingPeriod";
 
-type SortKey = "filename" | "account_name" | "document_type" | "imported_at" | "detected_transaction_count";
+type SortKey = "filename" | "account_name" | "document_type" | "period_end" | "imported_at" | "detected_transaction_count";
 
 const COLUMNS: { key: SortKey; label: MessageKey; align?: "right" }[] = [
   { key: "filename", label: "imports.col.file" },
   { key: "account_name", label: "imports.col.account" },
   { key: "document_type", label: "imports.col.type" },
+  { key: "period_end", label: "imports.col.period" },
   { key: "imported_at", label: "imports.col.imported" },
   { key: "detected_transaction_count", label: "imports.col.rows", align: "right" },
 ];
@@ -19,7 +21,7 @@ const COLUMNS: { key: SortKey; label: MessageKey; align?: "right" }[] = [
 function compare(a: ImportRecord, b: ImportRecord, key: SortKey): number {
   const x = a[key], y = b[key];
   if (typeof x === "number" && typeof y === "number") return x - y;
-  return String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" });
+  return String(x ?? "").localeCompare(String(y ?? ""), undefined, { numeric: true, sensitivity: "base" });
 }
 
 /** The import history: filter by account, sort by any column, select
@@ -29,6 +31,8 @@ export function ImportHistory() {
   const history = useImportHistory();
   const removeMany = useRemoveImports();
   const [accountId, setAccountId] = useState<number | "all">("all");
+  // "all", a year ("2026") or a month ("2026-07")
+  const [period, setPeriod] = useState("all");
   const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({ key: "imported_at", descending: true });
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [confirming, setConfirming] = useState(false);
@@ -43,11 +47,30 @@ export function ImportHistory() {
   }, [records]);
   // a filter on an account whose imports are all gone falls back to "all"
   const filter = accountId !== "all" && records.some((r) => r.account_id === accountId) ? accountId : "all";
+  const ofAccount = useMemo(
+    () => records.filter((r) => filter === "all" || r.account_id === filter),
+    [records, filter],
+  );
+  // the years and months the account's imports are about, newest first
+  const periods = useMemo(() => {
+    const byYear = new Map<string, Set<string>>();
+    for (const r of ofAccount) {
+      for (const m of billingMonths(r.period_start, r.period_end)) {
+        if (!byYear.has(m.slice(0, 4))) byYear.set(m.slice(0, 4), new Set());
+        byYear.get(m.slice(0, 4))!.add(m);
+      }
+    }
+    return [...byYear.entries()].sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([year, months]) => [year, [...months].sort().reverse()] as const);
+  }, [ofAccount]);
+  // a period no import of the account is about any more falls back to "all"
+  const periodFilter = periods.some(([year, months]) => year === period || months.includes(period)) ? period : "all";
   const shown = useMemo(() => {
-    const rows = records.filter((r) => filter === "all" || r.account_id === filter);
+    const rows = ofAccount.filter((r) => periodFilter === "all"
+      || billingMonths(r.period_start, r.period_end).some((m) => m.startsWith(periodFilter)));
     rows.sort((a, b) => compare(a, b, sort.key) * (sort.descending ? -1 : 1) || b.id - a.id);
     return rows;
-  }, [records, filter, sort]);
+  }, [ofAccount, periodFilter, sort]);
 
   // only what is shown can be selected
   const visibleSelected = shown.filter((r) => selected.has(r.id));
@@ -77,6 +100,12 @@ export function ImportHistory() {
     setConfirming(false);
   }
 
+  function changePeriod(value: string) {
+    setPeriod(value);
+    setSelected(new Set());
+    setConfirming(false);
+  }
+
   function sortBy(key: SortKey) {
     setSort((prev) => ({ key, descending: prev.key === key ? !prev.descending : key === "imported_at" }));
   }
@@ -98,6 +127,27 @@ export function ImportHistory() {
     <Card>
       <div className="px-5 py-4 border-b border-border flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-ink">{t("imports.history")}</h2>
+        <div className="flex flex-wrap items-center gap-2">
+        {periods.length > 0 && (
+          <select
+            aria-label={t("imports.filterPeriod")}
+            className="text-sm border border-border-strong rounded-md px-2.5 py-1.5 bg-surface text-ink"
+            value={periodFilter}
+            onChange={(e) => changePeriod(e.target.value)}
+          >
+            <option value="all">{t("imports.allPeriods")}</option>
+            {periods.map(([year, months]) => (
+              <optgroup key={year} label={year}>
+                <option value={year}>{t("imports.wholeYear", { year })}</option>
+                {months.map((m) => (
+                  <option key={m} value={m}>
+                    {formatMonthLong(m)}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        )}
         {accounts.length > 1 && (
           <select
             aria-label={t("imports.filterAccount")}
@@ -113,6 +163,7 @@ export function ImportHistory() {
             ))}
           </select>
         )}
+        </div>
       </div>
 
       {(visibleSelected.length > 0 || summary) && (
@@ -158,7 +209,7 @@ export function ImportHistory() {
                       <th
                         key={column.key}
                         aria-sort={active ? (sort.descending ? "descending" : "ascending") : "none"}
-                        className={`font-medium px-5 py-2.5 ${column.align === "right" ? "text-right" : "text-left"}`}
+                        className={`font-medium px-3 first:pl-5 py-2.5 ${column.align === "right" ? "text-right" : "text-left"}`}
                         title={column.key === "detected_transaction_count" ? t("imports.col.rowsHint") : undefined}
                       >
                         <button
@@ -173,7 +224,7 @@ export function ImportHistory() {
                       </th>
                     );
                   })}
-                  <th className="px-5 py-2.5 text-right font-medium">
+                  <th className="pl-3 pr-5 py-2.5 text-right font-medium">
                     <label className="inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
                       <input ref={selectAll} type="checkbox" checked={allShownSelected} onChange={toggleAll} />
                       {t("imports.selectAll")}

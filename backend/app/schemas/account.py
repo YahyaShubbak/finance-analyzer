@@ -115,3 +115,16 @@ class AccountRead(BaseModel):
     current_balance_minor: int = 0
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class StatementReminderRead(BaseModel):
+    """A statement that should be ready to download (app.services.statement_reminders)."""
+    account_id: int
+    account_name: str
+    account_type: AccountType
+    last_period_end: date
+    period_end: date
+    missing: int
+    rhythm_months: int
+    month_end: bool
+    day: int

@@ -83,6 +83,7 @@ def test_the_order_of_a_list_is_asc_or_desc_on_both_sides():
 
 @pytest.mark.parametrize(("interface", "schema"), [
     ("Account", account.AccountRead),
+    ("StatementReminder", account.StatementReminderRead),
     ("Transaction", transaction.TransactionRead),
     ("TransactionListResponse", transaction.TransactionListResponse),
     ("LearnedCategoryRule", transaction.LearnedCategoryRuleRead),

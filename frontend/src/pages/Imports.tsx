@@ -19,7 +19,7 @@ export function Imports() {
   return (
     <div>
       <PageHeader title={t("imports.title")} subtitle={t("imports.subtitle")} />
-      <div className="p-8 space-y-6 max-w-4xl">
+      <div className="p-8 space-y-6 max-w-6xl">
         <div className="space-y-2">
           <DropZone onFiles={addFiles} />
           <label className="flex items-start gap-2 text-xs text-ink-muted">

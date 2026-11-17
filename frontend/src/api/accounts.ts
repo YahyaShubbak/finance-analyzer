@@ -1,5 +1,5 @@
 import { apiGet, apiPatch, apiPost } from "./client";
-import type { Account, AccountType } from "../types";
+import type { Account, AccountType, StatementReminder } from "../types";
 
 export function listAccounts(includeArchived = false) {
   return apiGet<Account[]>("/api/accounts", { include_archived: includeArchived || undefined });
@@ -16,4 +16,9 @@ export function updateAccount(
   >
 ) {
   return apiPatch<Account>(`/api/accounts/${id}`, patch);
+}
+
+/** Statements that should be out by now but are not imported yet. */
+export function listStatementReminders() {
+  return apiGet<StatementReminder[]>("/api/accounts/statement-reminders");
 }

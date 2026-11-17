@@ -2,6 +2,7 @@ import { Suspense, useEffect, useRef } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { ErrorBoundary } from "../components/ErrorBoundary";
+import { StatementReminderBanner } from "../components/StatementReminderBanner";
 import { LANGUAGES, type Lang } from "../i18n/core";
 import { useI18n } from "../i18n/useI18n";
 import { useRestartNeeded, useSystemInfo } from "../hooks/useSystem";
@@ -83,6 +84,7 @@ export function AppShell() {
             {t("app.restartNeeded")}
           </div>
         )}
+        <StatementReminderBanner />
         <ErrorBoundary key={location.pathname}>
           {/* Inner Suspense: while a page bundle loads, the sidebar stays visible. */}
           <Suspense fallback={<div className="p-8 text-sm text-ink-muted">{t("app.loading")}</div>}>
