@@ -62,6 +62,15 @@ export const HELP_EN: HelpSection[] = [
         ],
       },
       {
+        id: "reminders",
+        title: "Reminder of new statements",
+        body: [
+          "When opened, the app names the statements that should be out by now. It learns when each account gets its statement (end of month, around the 15th, quarterly …) from the statements already imported; one counts as ready the day after its period ends. Archived accounts and accounts without a statement for six periods are left out.",
+          "“Noted” reminds you again the next time, “OK” not until the next statement is due, “Don't remind me again” turns the reminder off — Settings turns it back on.",
+          "On the Imports page, the “Billing period” column shows which months an import is about (e.g. “June – July 2026” for a statement ending mid-July); the list can be filtered by it.",
+        ],
+      },
+      {
         id: "check-original",
         title: "Check against the original",
         body: [

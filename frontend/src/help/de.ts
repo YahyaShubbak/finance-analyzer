@@ -62,6 +62,15 @@ export const HELP_DE: HelpSection[] = [
         ],
       },
       {
+        id: "reminders",
+        title: "Erinnerung an neue Auszüge",
+        body: [
+          "Beim Öffnen nennt die App die Auszüge, die inzwischen erschienen sein sollten. Wann ein Konto seinen Auszug bekommt (Monatsende, um den 15., quartalsweise …), lernt sie aus den bereits importierten Auszügen; als verfügbar gilt einer am Tag nach dem Ende seines Zeitraums. Archivierte Konten und Konten ohne Auszug seit sechs Zeiträumen bleiben außen vor.",
+          "„Zur Kenntnis genommen“ erinnert beim nächsten Öffnen wieder, „OK“ erst beim nächsten fälligen Auszug, „Nicht mehr erinnern“ schaltet die Erinnerung ab — in den Einstellungen lässt sie sich wieder einschalten.",
+          "Unter „Importe“ zeigt die Spalte „Abrechnungszeitraum“, um welche Monate es in einem Import geht (z. B. „Juni – Juli 2026“ für eine Abrechnung bis Mitte Juli); danach lässt sich die Liste filtern.",
+        ],
+      },
+      {
         id: "check-original",
         title: "Mit dem Original prüfen",
         body: [

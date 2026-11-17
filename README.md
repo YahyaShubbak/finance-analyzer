@@ -227,6 +227,10 @@ Environment variables with the same names take precedence.
   spreadsheet export) is recognized as the same bookings; the bookings
   already imported are completed with what only the other file has
   (merchant category, booking type).
+- **Reminders**: on opening, the app names the statements that should be
+  out by now, having learned from the imported ones when each account's
+  statement comes (end of month, mid-month, quarterly). The import history
+  shows each import's billing period and can be filtered by it.
 - **Credit cards**: a card statement is matched with the bank payment
   that settles it, so a purchase is never counted twice. A card export
   covering one billing period (e.g. the American Express CSV) whose
