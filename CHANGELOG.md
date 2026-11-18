@@ -8,6 +8,14 @@ start — back up your data before updating).
 ## Unreleased
 
 ### Added
+- Reimbursed expenses (travel costs paid yourself and paid back by the
+  employer): when money that came in gets a category of spending in the
+  list of transactions, the app asks whether it is a refund of that
+  spending or income. As a refund it lowers the category instead of
+  counting as income. The overview keeps a category refunded in full
+  (at 0) and says below it what was refunded; its bookings show "Spent,
+  refunded, paid yourself". A booking counted as income so far becomes a
+  refund by choosing its category again.
 - Reminder of new statements: on opening, the app names the statements that
   should be out by now, per account. It learns when each account's statement
   comes (end of month, mid-month, quarterly …) from the statements already

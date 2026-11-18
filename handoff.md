@@ -66,6 +66,13 @@ Dateien `.github/workflows/ci.yml`, `frontend/src/test/app.integration.test.tsx`
   gleichnamigen Spalten) vor der zweiten Zeile ankam. Der Test bestand nur,
   solange die Summen zuerst kamen; jetzt `getAllByText`.
 
+Am 2026-11-18 schlug der Integrationstest „sidebar navigation moves between
+pages“ fehl: `getByRole("link", { name: /Imports/i })` fand auch „Go to
+imports“ aus der Erinnerung an neue Abrechnungen (erscheint nur, wenn eine
+fällig ist). Die Sidebar-Links werden jetzt mit exaktem Namen gesucht
+(`/^Imports$/i`, `/^Transactions$/i`). Regel für neue Tests dort: Links und
+Überschriften immer mit `^…$` ansprechen.
+
 Noch ungeprüft: `release.yml` (läuft erst bei einem Tag; ruft `ci.yml` als
 `workflow_call` auf und vergleicht Tag und Version — die Versions-Extraktion
 per `sed` ist lokal ausprobiert).
@@ -74,6 +81,37 @@ Die Fehlermeldungen eines CI-Laufs stehen ohne Anmeldung unter
 `https://api.github.com/repos/<owner>/<repo>/check-runs/<job-id>/annotations`
 (Job-IDs aus `/actions/runs/<run-id>/jobs`); `gh` ist auf dieser Maschine
 nicht installiert.
+
+## Erstattungen (2026-11-18, auf Wunsch des Nutzers)
+
+Der Nutzer wollte erstattete Reisekosten als „Umbuchung“ markieren. Das wäre
+falsch: Eine Umbuchung zählt gar nicht, die Reise bliebe voll als Ausgabe
+stehen. Die App hatte schon den Typ „Erstattung“ (positive Buchung mit Typ
+`expense`, verringert ihre Kategorie, `compute_category_breakdown` /
+`_expense_part`), aber er war nur im Prüf-Formular erreichbar. Umgesetzt:
+
+- `countingOf(tx, category)` in `frontend/src/lib/categories.ts`: Bekommt
+  eine Gutschrift (positiv, Typ nicht `expense`, keine Umbuchung) eine
+  Kategorie, die weder Einnahme (`Salary`, `Other Income`) noch Umbuchung
+  (`Transfers`, `Card bills`) ist, fragt `CategoryCell` „Als Erstattung /
+  Als Einnahme“ — auch bei der aktuellen Kategorie (so wird eine bisherige
+  Einnahme zur Erstattung). Bekommt eine Erstattung eine Einnahme-Kategorie,
+  wird sie ohne Frage wieder Einnahme.
+- `useCategoryAssignment.assign(tx, category, countAs)`: ändert den Typ
+  **nur bei dieser Buchung, nie gelernt** — wer Reisekosten erstattet, zahlt
+  oft auch das Gehalt; eine gelernte Regel „Arbeitgeber → Reisen“ würde das
+  Gehalt mitnehmen. Folge: Jede künftige Erstattung muss einmal von Hand als
+  Erstattung markiert werden (Regeln kennen keinen Typ).
+- Backend: `compute_category_breakdown` liefert 4-Tupel
+  `(kategorie, währung, netto, erstattet)` und behält voll erstattete
+  Kategorien (netto 0); `CategoryBreakdownItem.refunded_minor`,
+  `CategoryTransactionsResponse.spent_minor` / `refunded_minor`
+  (`expense_parts_of`; `expense_minor_of` entfällt). Frontend: Hinweis
+  „… erstattet“ unter dem Balken (`BreakdownBars.note`), in der
+  Buchungsliste der Kategorie „Ausgegeben …, erstattet …, selbst getragen …“.
+- Tests: `backend/tests/test_reports_api.py` (voll erstattete Reise),
+  `frontend/src/components/transactions/refunds.test.tsx`.
+- Nicht umgesetzt: Erstattungen beim Import erkennen; Regeln mit Typ.
 
 ## Arbeitsweise, die der Nutzer erwartet
 
