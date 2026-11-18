@@ -159,10 +159,12 @@ describe.skipIf(!API_BASE)("Real app against a real (throwaway) backend", () => 
     renderApp("/");
     await screen.findByRole("heading", { name: "Dashboard" });
 
-    await user.click(screen.getByRole("link", { name: /Transactions/i }));
+    // the sidebar's links by their exact names: a page may link there too ("Go to imports" in the
+    // reminder of new statements, which shows only when a statement is due)
+    await user.click(screen.getByRole("link", { name: /^Transactions$/i }));
     expect(await screen.findByRole("heading", { name: "Transactions" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("link", { name: /Imports/i }));
+    await user.click(screen.getByRole("link", { name: /^Imports$/i }));
     expect(await screen.findByRole("heading", { name: "Imports" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("link", { name: /^Dashboard$/i }));
