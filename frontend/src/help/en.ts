@@ -107,6 +107,7 @@ export const HELP_EN: HelpSection[] = [
             "Income: money you receive (salary, interest, gifts …).",
             "Expense: money you spend.",
             "Refund: an expense with a positive amount — money coming back for an expense (a return, a credit, a friend paying their share). It lowers the spending of its category and is not counted as income.",
+            "Reimbursed travel costs (or other expenses): when money that came in gets a category of spending such as \"Travel\" in the list of transactions, the app asks whether it counts as a refund or as income. As a refund it lowers the travel costs: the overview shows \"Travel\" with what you paid yourself and, below it, what was refunded; choosing it shows \"Spent, refunded, paid yourself\". Don't mark it as a transfer — a transfer counts nowhere, and the trip would look as if you had paid it yourself. Refunds are not learned: whoever reimburses travel often pays the salary, too.",
             "Transfer: money between your own accounts, including paying a card bill from the checking account. Transfers count as neither income nor expense — otherwise a card purchase would be counted twice.",
           ],
           "Duplicates and the bookings of archived accounts are not counted anywhere.",

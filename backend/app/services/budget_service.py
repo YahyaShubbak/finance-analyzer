@@ -106,7 +106,7 @@ def compute_budget_status(session: Session, month: str) -> list[BudgetStatus]:
     # purchase filed under the same category can't silently inflate a
     # budget denominated in a different currency.
     actual_by_key: dict[tuple[str, str], int] = defaultdict(int)
-    for category, currency, amount in breakdown:
+    for category, currency, amount, _refunded in breakdown:
         actual_by_key[(category, currency)] += amount
 
     return [

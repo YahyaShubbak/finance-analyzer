@@ -149,19 +149,27 @@ def compute_category_breakdown(
     account_ids: list[int] | None = None,
     start: date | None = None,
     end: date | None = None,
-) -> list[tuple[str, str, int]]:
-    """Net expenses grouped by (category, currency), sorted largest-first.
+) -> list[tuple[str, str, int, int]]:
+    """Net expenses grouped by (category, currency), sorted largest-first,
+    with what came back of them: (category, currency, net, refunded).
     Refunds are netted against their category; a category whose refunds
     exceed its spending appears with a negative amount (last), so the rows
-    always add up to the total expenses."""
+    always add up to the total expenses. A category whose spending was
+    refunded in full stays in the list (net 0): it was spent on, and the
+    refund shows that it cost nothing."""
     category = func.coalesce(Transaction.category, "Other Expense")
+    refunded = case(
+        (and_(Transaction.transaction_type == TransactionType.EXPENSE, Transaction.amount_minor > 0),
+         Transaction.amount_minor),
+        else_=0,
+    )
     rows = session.exec(
-        select(category, Transaction.currency, func.sum(_expense_part))
+        select(category, Transaction.currency, func.sum(_expense_part), func.sum(refunded))
         .where(*_scope_filters(session, account_ids, start, end), _is_expense_kind)
         .group_by(category, Transaction.currency)
     ).all()
     return sorted(
-        ((cat, currency, int(amount)) for cat, currency, amount in rows if amount),
+        ((cat, currency, int(amount), int(back)) for cat, currency, amount, back in rows if amount or back),
         key=lambda row: row[2], reverse=True,
     )
 
@@ -184,15 +192,24 @@ def category_transactions_query(
     )
 
 
-def expense_minor_of(session: Session, query) -> int:
-    """Net spending of the transactions a *_transactions_query selects."""
+def expense_parts_of(session: Session, query) -> tuple[int, int]:
+    """(spent, refunded) of the transactions a *_transactions_query selects:
+    what was paid out, and what came back for it (refunds — positive
+    expenses). Spent minus refunded is the net spending of the bar.
+    E.g. a trip paid and reimbursed: spent 1200, refunded 1200 — it was
+    travelled for 1200, and it cost nothing."""
     sub = query.subquery()
-    amount = case(
-        (sub.c.transaction_type == TransactionType.EXPENSE, -sub.c.amount_minor),
+    spent = case(
+        (and_(sub.c.transaction_type == TransactionType.EXPENSE, sub.c.amount_minor < 0), -sub.c.amount_minor),
         (and_(sub.c.transaction_type == TransactionType.UNKNOWN, sub.c.amount_minor < 0), -sub.c.amount_minor),
         else_=0,
     )
-    return int(session.exec(select(func.coalesce(func.sum(amount), 0))).one())
+    refunded = case(
+        (and_(sub.c.transaction_type == TransactionType.EXPENSE, sub.c.amount_minor > 0), sub.c.amount_minor),
+        else_=0,
+    )
+    row = session.exec(select(func.coalesce(func.sum(spent), 0), func.coalesce(func.sum(refunded), 0))).one()
+    return int(row[0]), int(row[1])
 
 
 @dataclass

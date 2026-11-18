@@ -107,6 +107,7 @@ export const HELP_DE: HelpSection[] = [
             "Einnahme: Geld, das Sie bekommen (Gehalt, Zinsen, Geschenke …).",
             "Ausgabe: Geld, das Sie ausgeben.",
             "Erstattung: eine Ausgabe mit positivem Betrag — Geld, das für eine Ausgabe zurückkommt (Rückgabe, Gutschrift, ein Freund zahlt seinen Anteil). Sie verringert die Ausgaben ihrer Kategorie und zählt nicht als Einnahme.",
+            "Erstattete Reisekosten (oder andere Auslagen): Bekommt eine Gutschrift in der Buchungsliste eine Ausgaben-Kategorie wie „Reisen“, fragt die App, ob sie als Erstattung oder als Einnahme zählt. Als Erstattung verringert sie die Reisekosten: In der Übersicht steht „Reisen“ dann mit dem, was Sie selbst getragen haben, und darunter, was erstattet wurde; ein Klick zeigt „Ausgegeben, erstattet, selbst getragen“. Nicht als Umbuchung markieren — eine Umbuchung zählt gar nicht, dann sähe es aus, als hätten Sie die Reise selbst bezahlt. Erstattungen werden nicht gelernt: Wer Reisekosten erstattet, zahlt oft auch das Gehalt.",
             "Umbuchung: Geld zwischen Ihren eigenen Konten, auch das Begleichen einer Kreditkartenabrechnung vom Girokonto. Umbuchungen zählen weder als Einnahme noch als Ausgabe — sonst würde ein Kauf mit der Karte doppelt gezählt.",
           ],
           "Duplikate und Buchungen archivierter Konten zählen nirgends mit.",

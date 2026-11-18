@@ -26,7 +26,8 @@ class TotalsResponse(BaseModel):
 class CategoryBreakdownItem(BaseModel):
     category: str
     currency: str
-    amount_minor: int  # positive magnitude spent in this category (in this currency)
+    amount_minor: int  # net spent in this category (in this currency): paid out minus refunded
+    refunded_minor: int = 0  # what came back for it (refunds, e.g. reimbursed travel costs)
 
 
 class LocationBreakdownItem(BaseModel):
@@ -44,6 +45,8 @@ class CategoryTransactionsResponse(BaseModel):
     page: int
     page_size: int
     amount_minor: int  # net spending of ALL matching transactions (not just this page) — the bar's amount
+    spent_minor: int = 0     # ... of which paid out
+    refunded_minor: int = 0  # ... and came back (refunds): amount_minor = spent_minor - refunded_minor
 
 
 # The transactions behind one row of /by-location: same shape.

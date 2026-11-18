@@ -1,6 +1,9 @@
 export type AccountType = "checking" | "savings" | "credit_card" | "other";
 export type DocumentType = "bank_statement" | "credit_card_statement" | "unknown";
 export type TransactionType = "income" | "expense" | "transfer" | "unknown";
+/** How a booking that came in counts with the category chosen for it: a
+ * refund lowers that category's spending, income is income. */
+export type CountAs = "refund" | "income";
 export type ReconciliationStatus = "reconciled" | "mismatch" | "unresolved" | "pending";
 
 export interface Account {
@@ -341,12 +344,19 @@ export interface Totals {
 export interface CategoryBreakdownItem {
   category: string;
   currency: string;
+  /** net: paid out minus refunded */
   amount_minor: number;
+  /** what came back for it (refunds, e.g. reimbursed travel costs) */
+  refunded_minor: number;
 }
 
 export interface CategoryTransactions extends TransactionListResponse {
   /** net spending of all matching transactions (not just this page) */
   amount_minor: number;
+  /** ... of which paid out */
+  spent_minor: number;
+  /** ... and came back (refunds): amount_minor = spent_minor - refunded_minor */
+  refunded_minor: number;
 }
 
 export interface LocationBreakdownItem {

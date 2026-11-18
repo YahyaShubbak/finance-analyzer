@@ -34,6 +34,7 @@ export function CategoryAssignmentBar({
                   : t("tx.learnedNone", { pattern: notice.pattern, category: categoryLabel(t, notice.category) }))}
               {notice.kind === "notLearnable" && t("tx.notLearnable", { category: categoryLabel(t, notice.category) })}
               {notice.kind === "only" && t("tx.changedOnly", { category: categoryLabel(t, notice.category) })}
+              {notice.kind === "refund" && t("tx.countedAsRefund", { category: categoryLabel(t, notice.category) })}
               {notice.kind === "forgotten" && tn("tx.forgotten", notice.count)}
             </span>
             {notice.kind === "learned" && (

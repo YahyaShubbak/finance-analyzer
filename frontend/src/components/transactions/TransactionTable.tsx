@@ -1,5 +1,5 @@
 import { Badge, Pager } from "../ui";
-import type { Transaction, TransactionSort, TransactionSortKey } from "../../types";
+import type { CountAs, Transaction, TransactionSort, TransactionSortKey } from "../../types";
 import { formatDate, formatSignedMoney } from "../../lib/format";
 import { categoryLabel } from "../../lib/categories";
 import { placeLabel } from "../../lib/places";
@@ -23,7 +23,7 @@ export function TransactionTable({
   pageSize: number;
   onPageChange: (page: number) => void;
   /** makes the category column editable */
-  onAssignCategory?: (transaction: Transaction, category: string) => void;
+  onAssignCategory?: (transaction: Transaction, category: string, countAs?: CountAs) => void;
   savingId?: number | null;
   /** makes the date, account, type and amount headings sort the list */
   sort?: TransactionSort;

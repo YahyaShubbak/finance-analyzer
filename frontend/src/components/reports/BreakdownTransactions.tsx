@@ -77,6 +77,16 @@ function RowTransactions({ title, currency, queryKey, fetchPage, emptyText, onCl
               {tn("reports.categoryTotal", query.data.total, { amount: formatMoney(query.data.amount_minor, currency) })}
             </p>
           )}
+          {query.data && query.data.refunded_minor > 0 && (
+            // e.g. reimbursed travel: travelled for this much, and it cost that much
+            <p className="text-xs text-ink-muted mt-0.5">
+              {t("reports.spentRefundedOwn", {
+                spent: formatMoney(query.data.spent_minor, currency),
+                refunded: formatMoney(query.data.refunded_minor, currency),
+                own: formatMoney(query.data.amount_minor, currency),
+              })}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-4">
           <input

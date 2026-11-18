@@ -7,6 +7,8 @@ export interface BreakdownBar {
   amount_minor: number;
   /** shown greyed out and left out of the scale and the shares, e.g. "no known place" */
   muted?: boolean;
+  /** a second, small line under the label, e.g. what was refunded */
+  note?: string;
 }
 
 /** Amounts (one currency) as a list of bars, largest first. Every row is a
@@ -51,6 +53,7 @@ export function BreakdownBars({
                 )}
               >
                 {d.label}
+                {d.note && <span className="block text-[11px] text-income">{d.note}</span>}
               </span>
               <span className="h-2.5 rounded-full bg-surface-sunken overflow-hidden" aria-hidden>
                 <span

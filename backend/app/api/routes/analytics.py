@@ -57,7 +57,7 @@ def by_category(
     session: Session = Depends(get_session),
 ):
     breakdown = analytics_service.compute_category_breakdown(session, parse_account_ids(account_id), start, end)
-    return [CategoryBreakdownItem(category=c, currency=cur, amount_minor=a) for c, cur, a in breakdown]
+    return [CategoryBreakdownItem(category=c, currency=cur, amount_minor=a, refunded_minor=r) for c, cur, a, r in breakdown]
 
 
 @router.get("/by-category/transactions", response_model=CategoryTransactionsResponse)
@@ -93,12 +93,15 @@ def _transactions_page(session: Session, query, page: int, page_size: int, searc
         .limit(page_size)
     ).all()
     account_names = {a.id: a.name for a in session.exec(select(Account)).all()}
+    spent, refunded = analytics_service.expense_parts_of(session, query)
     return CategoryTransactionsResponse(
         items=[transaction_read(t, account_names.get(t.account_id, "Unknown")) for t in page_items],
         total=total,
         page=page,
         page_size=page_size,
-        amount_minor=analytics_service.expense_minor_of(session, query),
+        amount_minor=spent - refunded,
+        spent_minor=spent,
+        refunded_minor=refunded,
     )
 
 

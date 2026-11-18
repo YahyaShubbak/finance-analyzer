@@ -42,7 +42,7 @@ def test_single_currency_totals_unchanged_shape(client):
     assert totals["net_minor"] == 244000
 
     categories = client.get("/api/analytics/by-category").json()
-    assert categories == [{"category": "Groceries", "currency": "EUR", "amount_minor": 6000}]
+    assert categories == [{"category": "Groceries", "currency": "EUR", "amount_minor": 6000, "refunded_minor": 0}]
 
     monthly = client.get("/api/analytics/over-time").json()
     assert monthly == [{"month": "2026-03", "currency": "EUR", "income_minor": 250000, "expenses_minor": 6000}]

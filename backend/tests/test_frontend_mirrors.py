@@ -101,6 +101,7 @@ def test_the_order_of_a_list_is_asc_or_desc_on_both_sides():
     ("CurrencyTotals", analytics.CurrencyTotals),
     ("Totals", analytics.TotalsResponse),
     ("CategoryBreakdownItem", analytics.CategoryBreakdownItem),
+    ("CategoryTransactions", analytics.CategoryTransactionsResponse),
     ("LocationBreakdownItem", analytics.LocationBreakdownItem),
     ("MonthlyPoint", analytics.MonthlyPoint),
     ("AccountBreakdownItem", analytics.AccountBreakdownItem),

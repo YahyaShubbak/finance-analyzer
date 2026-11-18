@@ -148,7 +148,7 @@ def test_reports_respect_date_range(client, tmp_path):
     march_categories = client.get(
         "/api/analytics/by-category", params={"start": "2026-03-01", "end": "2026-03-31"}
     ).json()
-    assert march_categories == [{"category": "Groceries", "currency": "EUR", "amount_minor": 5000}]
+    assert march_categories == [{"category": "Groceries", "currency": "EUR", "amount_minor": 5000, "refunded_minor": 0}]
 
     march_over_time = client.get(
         "/api/analytics/over-time", params={"start": "2026-03-01", "end": "2026-03-31"}
@@ -232,3 +232,35 @@ def test_category_transactions_can_be_searched_and_sorted(client):
     assert by_account[0]["account_name"] == "A-Card" and by_account[-1]["account_name"] == "Checking"
 
     assert client.get(url, params={**base, "sort": "nonsense"}).status_code == 422
+
+
+def test_a_reimbursed_trip_shows_what_was_spent_and_what_it_cost(client):
+    """Paid for a trip, got it back from the employer: the category says it
+    was travelled for 1200, and that it cost nothing - and the income is not
+    swollen by the reimbursement."""
+    account = _create_account(client, "Giro", "checking")
+    _import_csv(client, "march.csv", (
+        b"Date,Description,Amount\n"
+        b"2026-03-02,Deutsche Bahn Fernverkehr,-200.00\n"
+        b"2026-03-03,Hotel Beispiel Hamburg,-1000.00\n"
+        b"2026-03-20,Arbeitgeber GmbH Reisekostenerstattung,1200.00\n"
+    ), account)
+    items = {t["normalized_description"]: t for t in client.get("/api/transactions").json()["items"]}
+    for name in ("Deutsche Bahn Fernverkehr", "Hotel Beispiel Hamburg"):
+        assert client.patch(f"/api/transactions/{items[name]['id']}", json={"category": "Travel"}).status_code == 200
+    refund = items["Arbeitgeber GmbH Reisekostenerstattung"]
+    assert refund["transaction_type"] == "income"  # as it arrives
+    r = client.patch(f"/api/transactions/{refund['id']}", json={"category": "Travel", "transaction_type": "expense"})
+    assert r.status_code == 200 and r.json()["transaction_type"] == "expense"
+
+    q = {"start": "2026-03-01", "end": "2026-03-31"}
+    totals = client.get("/api/analytics/totals", params=q).json()
+    assert (totals["income_minor"], totals["expenses_minor"]) == (0, 0)
+    # still in the list of categories (to be chosen), with what came back
+    [row] = [r for r in client.get("/api/analytics/by-category", params=q).json() if r["category"] == "Travel"]
+    assert (row["amount_minor"], row["refunded_minor"]) == (0, 120000)
+
+    travel = client.get("/api/analytics/by-category/transactions",
+                        params={**q, "category": "Travel", "currency": "EUR"}).json()
+    assert travel["total"] == 3
+    assert (travel["spent_minor"], travel["refunded_minor"], travel["amount_minor"]) == (120000, 120000, 0)
