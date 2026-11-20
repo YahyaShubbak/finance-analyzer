@@ -31,6 +31,7 @@ class AccountType(str, enum.Enum):
     CHECKING = "checking"
     SAVINGS = "savings"
     CREDIT_CARD = "credit_card"
+    CASH = "cash"  # a wallet: manual entries, withdrawals count as money moved into it
     OTHER = "other"
 
 

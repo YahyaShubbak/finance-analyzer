@@ -71,6 +71,15 @@ export const HELP_EN: HelpSection[] = [
         ],
       },
       {
+        id: "cash",
+        title: "Cash",
+        body: [
+          "Under Accounts, create an account of the kind “Cash” — your wallet. Withdrawals at a cash machine (category “Cash”) then no longer count as spending but as money moved into the wallet; you need not match anything to a particular withdrawal.",
+          "On the cash account, book what you paid in cash (with a category, e.g. groceries) and cash that did not come from an account — a debt paid back, a present from family. The bookings appear under Transactions and count in reports and budgets.",
+          "With “Count cash” you enter what is really in the wallet. The difference to what should be there is booked as spending of the category “Cash” — so cash you did not book is still counted as spent, just not classified.",
+        ],
+      },
+      {
         id: "check-original",
         title: "Check against the original",
         body: [

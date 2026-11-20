@@ -71,6 +71,15 @@ export const HELP_DE: HelpSection[] = [
         ],
       },
       {
+        id: "cash",
+        title: "Bargeld",
+        body: [
+          "Legen Sie unter „Konten“ ein Konto der Art „Bargeld“ an — Ihr Portemonnaie. Abhebungen am Geldautomaten (Kategorie „Bargeld“) zählen dann nicht mehr als Ausgabe, sondern als Umbuchung ins Portemonnaie; einer bestimmten Abhebung müssen Sie nichts zuordnen.",
+          "Beim Bargeld-Konto buchen Sie, was Sie bar bezahlt haben (mit Kategorie, z. B. Lebensmittel), und Bargeld, das nicht vom Konto kam — zurückgezahlte Schulden, Geschenke der Familie. Die Buchungen erscheinen unter „Transaktionen“ und zählen in Auswertungen und Budgets.",
+          "Mit „Kassensturz“ geben Sie ein, was tatsächlich im Portemonnaie ist. Die Differenz zum erwarteten Bestand wird als Ausgabe „Bargeld“ gebucht — so fehlt nicht erfasstes Bargeld in den Ausgaben nicht, es bleibt nur unklassifiziert.",
+        ],
+      },
+      {
         id: "check-original",
         title: "Mit dem Original prüfen",
         body: [

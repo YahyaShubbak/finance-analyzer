@@ -3,6 +3,7 @@ import { useI18n } from "../../i18n/useI18n";
 import { AccountTypeBadge } from "../ui/AccountTypeBadge";
 import { Badge, Button } from "../ui";
 import { OpeningBalanceForm } from "./OpeningBalanceForm";
+import { CashEntryForm } from "./CashEntryForm";
 import { useUpdateAccount } from "../../hooks/useAccounts";
 import { formatAccountBalance } from "../../lib/accountBalance";
 import { formatDate, formatMoney } from "../../lib/format";
@@ -167,6 +168,11 @@ export function AccountRow({ account }: { account: Account }) {
             </div>
             <p className="text-[11px] text-ink-faint mb-3 max-w-lg">{t("accounts.openingHelp")}</p>
             <OpeningBalanceForm account={account} />
+            {account.account_type === "cash" && (
+              <div className="mt-5 pt-4 border-t border-border">
+                <CashEntryForm account={account} />
+              </div>
+            )}
           </td>
         </tr>
       )}

@@ -22,3 +22,22 @@ export function updateAccount(
 export function listStatementReminders() {
   return apiGet<StatementReminder[]>("/api/accounts/statement-reminders");
 }
+
+export interface Wallet {
+  withdrawn_minor: number;
+  entries_minor: number;
+  balance_minor: number;
+}
+
+export function getWallet(accountId: number) {
+  return apiGet<Wallet>(`/api/accounts/${accountId}/wallet`);
+}
+
+/** amountMinor: negative paid out, positive taken in. */
+export function addCashEntry(accountId: number, entry: { transaction_date: string; amount_minor: number; category: string; note?: string }) {
+  return apiPost<Wallet>(`/api/accounts/${accountId}/cash-entries`, entry);
+}
+
+export function countCash(accountId: number, counted: { counted_on: string; counted_minor: number }) {
+  return apiPost<Wallet>(`/api/accounts/${accountId}/cash-count`, counted);
+}

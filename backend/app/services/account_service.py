@@ -28,6 +28,7 @@ from sqlmodel import Session, func, select
 
 from app.db.models import Account, Transaction
 from app.schemas.account import AccountRead
+from app.services.cash_service import active_wallet, withdrawn_minor
 
 
 @dataclass
@@ -59,7 +60,7 @@ def compute_account_summaries(session: Session) -> dict[int, AccountSummary]:
         .group_by(Account.id)
     ).all()
 
-    return {
+    summaries = {
         account_id: AccountSummary(
             transaction_count=count,
             transactions_balance_minor=int(total),
@@ -67,6 +68,13 @@ def compute_account_summaries(session: Session) -> dict[int, AccountSummary]:
         )
         for account_id, opening, count, total, since_opening in rows
     }
+    # the wallet also holds the cash taken out on the other accounts
+    wallet = active_wallet(session)
+    if wallet is not None and (withdrawn := withdrawn_minor(session)):
+        s = summaries.get(wallet.id, AccountSummary(0, 0, wallet.opening_balance_minor or 0))
+        summaries[wallet.id] = AccountSummary(s.transaction_count, s.transactions_balance_minor,
+                                              s.current_balance_minor + withdrawn)
+    return summaries
 
 
 def account_read(account: Account, summaries: dict[int, AccountSummary]) -> AccountRead:

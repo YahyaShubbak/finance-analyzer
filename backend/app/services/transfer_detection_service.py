@@ -44,6 +44,7 @@ from app.db.models import (
 )
 from app.iban import IBAN_RE, valid_iban
 from app.normalization.transfers import DEFAULT_MAX_DAY_GAP, TransferCandidate, find_transfer_pairs
+from app.services.cash_service import sync_withdrawals
 from app.services.duplicate_preview_service import load_rules
 from app.services.transfer_marking import (
     corrected_fields,
@@ -98,7 +99,9 @@ def run_transfer_detection(
     full_rescan: bool = False,
     date_window: tuple[date, date] | None = None,
 ) -> TransferDetectionResult:
-    accounts = session.exec(select(Account).where(Account.account_type != AccountType.CREDIT_CARD)).all()
+    sync_withdrawals(session)  # cash taken out moves into the wallet, if there is one
+    # a wallet's hand-made entries are never one side of a transfer
+    accounts = session.exec(select(Account).where(Account.account_type.not_in([AccountType.CREDIT_CARD, AccountType.CASH]))).all()
     if not accounts:
         return TransferDetectionResult(0, 0, 0, 0)
     card_accounts = session.exec(select(Account).where(Account.account_type == AccountType.CREDIT_CARD)).all()

@@ -61,6 +61,7 @@ from app.services.account_recognition import (
     recognize_account,
     remember_signature,
 )
+from app.services.cash_service import MANUAL_SOURCE
 from app.services.duplicate_preview_service import classify_import_rows
 from app.services.import_reading import (
     ImportServiceError,
@@ -510,7 +511,9 @@ def commit_import(payload: ImportCommitRequest, session: Session = Depends(get_s
 
 @router.get("", response_model=list[ImportRecordRead])
 def list_imports(session: Session = Depends(get_session)):
-    records = session.exec(select(ImportRecord).order_by(ImportRecord.imported_at.desc())).all()
+    # a cash account's hand-made entries are no file (app.services.cash_service)
+    records = session.exec(select(ImportRecord).where(ImportRecord.source_key.is_distinct_from(MANUAL_SOURCE))
+                           .order_by(ImportRecord.imported_at.desc())).all()
     accounts_by_id = {a.id: a.name for a in session.exec(select(Account)).all()}
     return [
         ImportRecordRead(

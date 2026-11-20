@@ -227,6 +227,10 @@ Environment variables with the same names take precedence.
   spreadsheet export) is recognized as the same bookings; the bookings
   already imported are completed with what only the other file has
   (merchant category, booking type).
+- **Cash**: an account of the kind *Cash* is your wallet. Withdrawals then
+  count as money moved into it, not as spending; what you pay or receive in
+  cash (a debt paid back, a present) is booked there by hand with a category,
+  and counting the wallet books the difference as unclassified cash spending.
 - **Reminders**: on opening, the app names the statements that should be
   out by now, having learned from the imported ones when each account's
   statement comes (end of month, mid-month, quarterly). The import history

@@ -55,6 +55,7 @@ export function CreateAccountForm({ onDone }: { onDone: () => void }) {
           <option value="checking">{t("accountType.checking")}</option>
           <option value="savings">{t("accountType.savings")}</option>
           <option value="credit_card">{t("accountType.credit_card")}</option>
+          <option value="cash">{t("accountType.cash")}</option>
           <option value="other">{t("accountType.other")}</option>
         </select>
       </div>

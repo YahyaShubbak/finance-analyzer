@@ -13,6 +13,10 @@ DE: dict[str, str] = {
         "account_id muss eine durch Kommas getrennte Liste von Zahlen sein.",
     "Account not found": "Konto nicht gefunden",
     "An account named '{name}' already exists.": "Ein Konto namens „{name}“ gibt es bereits.",
+    "This is not a cash account.": "Das ist kein Bargeld-Konto.",
+    "Enter an amount.": "Bitte geben Sie einen Betrag ein.",
+    "Unknown category.": "Unbekannte Kategorie.",
+    "Cash count: difference": "Kassensturz: Differenz",
     "Budget not found": "Budget nicht gefunden",
     "Invalid 'month' — expected format YYYY-MM.": "Ungültiger Monat — erwartet wird das Format JJJJ-MM.",
     "Invalid month '{month}' — expected format YYYY-MM.":

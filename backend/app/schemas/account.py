@@ -128,3 +128,23 @@ class StatementReminderRead(BaseModel):
     rhythm_months: int
     month_end: bool
     day: int
+
+
+class CashEntryCreate(BaseModel):
+    """A cash booking: negative paid out, positive taken in."""
+    transaction_date: date
+    amount_minor: int = Field(ge=-MAX_AMOUNT_MINOR, le=MAX_AMOUNT_MINOR)
+    category: str = Field(min_length=1, max_length=80)
+    note: str | None = Field(default=None, max_length=200)
+
+
+class CashCount(BaseModel):
+    """What the user counted in the wallet on a day."""
+    counted_on: date
+    counted_minor: int = Field(ge=0, le=MAX_AMOUNT_MINOR)
+
+
+class WalletRead(BaseModel):
+    withdrawn_minor: int
+    entries_minor: int
+    balance_minor: int

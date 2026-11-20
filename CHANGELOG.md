@@ -8,6 +8,11 @@ start — back up your data before updating).
 ## Unreleased
 
 ### Added
+- Cash: an account of the kind "Cash" is a wallet. With one, withdrawals
+  count as money moved into it instead of spending; cash paid or received
+  (a debt paid back, a present) is booked there by hand with a category, and
+  "Count cash" books the gap to the expected balance as unclassified cash
+  spending. Its entries are never paired as transfers.
 - Reimbursed expenses (travel costs paid yourself and paid back by the
   employer): when money that came in gets a category of spending in the
   list of transactions, the app asks whether it is a refund of that

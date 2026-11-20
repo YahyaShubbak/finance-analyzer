@@ -1,4 +1,4 @@
-export type AccountType = "checking" | "savings" | "credit_card" | "other";
+export type AccountType = "checking" | "savings" | "credit_card" | "cash" | "other";
 export type DocumentType = "bank_statement" | "credit_card_statement" | "unknown";
 export type TransactionType = "income" | "expense" | "transfer" | "unknown";
 /** How a booking that came in counts with the category chosen for it: a

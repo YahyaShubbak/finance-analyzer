@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import asdict
 from datetime import date
 
@@ -7,11 +8,21 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.db.models import Account
+from app.db.models import Account, AccountType
 from app.db.session import get_session
 from app.i18n import tr
-from app.schemas.account import AccountCreate, AccountRead, AccountUpdate, StatementReminderRead
+from app.schemas.account import (
+    AccountCreate,
+    AccountRead,
+    AccountUpdate,
+    CashCount,
+    CashEntryCreate,
+    StatementReminderRead,
+    WalletRead,
+)
+from app.services import cash_service
 from app.services.account_service import account_read, compute_account_summaries
+from app.services.category_service import list_categories
 from app.services.statement_reminders import statement_reminders
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
@@ -62,6 +73,8 @@ def create_account(payload: AccountCreate, session: Session = Depends(get_sessio
         session.rollback()
         raise HTTPException(status_code=409, detail=tr("An account named '{name}' already exists.", name=payload.name)) from None
     session.refresh(account)
+    if account.account_type == AccountType.CASH:
+        cash_service.sync_withdrawals(session)
     return account_read(account, {})
 
 
@@ -83,6 +96,53 @@ def update_account(account_id: int, payload: AccountUpdate, session: Session = D
         session.rollback()
         raise HTTPException(status_code=409, detail=tr("An account named '{name}' already exists.", name=payload.name)) from None
     session.refresh(account)
+    if account.account_type == AccountType.CASH:
+        cash_service.sync_withdrawals(session)  # archived or back: withdrawals follow
 
     summaries = compute_account_summaries(session)
     return account_read(account, summaries)
+
+
+def _cash_error(error: cash_service.CashError) -> HTTPException:
+    return HTTPException(status_code=404, detail=tr("This is not a cash account."))
+
+
+@router.get("/{account_id}/wallet", response_model=WalletRead)
+def get_wallet(account_id: int, session: Session = Depends(get_session)):
+    try:
+        return WalletRead(**dataclasses.asdict(cash_service.wallet_balance(session, account_id)))
+    except cash_service.CashError as e:
+        raise _cash_error(e) from None
+
+
+@router.post("/{account_id}/cash-entries", response_model=WalletRead)
+def add_cash_entry(account_id: int, payload: CashEntryCreate, session: Session = Depends(get_session)):
+    if payload.amount_minor == 0:
+        raise HTTPException(status_code=422, detail=tr("Enter an amount."))
+    if payload.category not in {c.name for c in list_categories(session)}:
+        raise HTTPException(status_code=422, detail=tr("Unknown category."))
+    try:
+        cash_service.add_entry(session, account_id, payload.transaction_date, payload.amount_minor,
+                               payload.category, payload.note)
+    except cash_service.CashError as e:
+        raise _cash_error(e) from None
+    return get_wallet(account_id, session)
+
+
+@router.post("/{account_id}/cash-count", response_model=WalletRead)
+def count_cash(account_id: int, payload: CashCount, session: Session = Depends(get_session)):
+    try:
+        cash_service.count_wallet(session, account_id, payload.counted_on, payload.counted_minor,
+                                  tr("Cash count: difference"))
+    except cash_service.CashError as e:
+        raise _cash_error(e) from None
+    return get_wallet(account_id, session)
+
+
+@router.delete("/{account_id}/cash-entries/{transaction_id}", response_model=WalletRead)
+def delete_cash_entry(account_id: int, transaction_id: int, session: Session = Depends(get_session)):
+    try:
+        cash_service.delete_entry(session, account_id, transaction_id)
+    except cash_service.CashError as e:
+        raise _cash_error(e) from None
+    return get_wallet(account_id, session)
